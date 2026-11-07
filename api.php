@@ -279,13 +279,21 @@ try {
                 run('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($pass, PASSWORD_DEFAULT), $u['id']]);
             }
             run('UPDATE users SET last_login = ? WHERE id = ?', [ms(), $u['id']]);
+            open_user_session($u);
             out(['ok' => true]);
+        }
+
+        case 'usage': {
+            $u = need_user();
+            need_admin($u);
+            out(['usage' => usage_report()]);
         }
 
         case 'logout': {
             need_post();
             start_session();
             if (csrf_ok()) {
+                close_user_session('logout');
                 $_SESSION = [];
                 session_destroy();
             }
