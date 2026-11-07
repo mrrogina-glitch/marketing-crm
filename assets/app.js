@@ -413,8 +413,8 @@ function initApp() {
         '<label class="chk"><input type="checkbox" id="arOn"' + (st.autoreply.enabled ? ' checked' : '') + '> Uključen. Svaki pošiljatelj dobiva najviše jedan automatski odgovor dnevno, a ne odgovara se na automatsku poštu, newslettere i no-reply adrese.</label>' +
         '<label class="f">Predmet<input id="arSubj" value="' + esc(st.autoreply.subject) + '"><span class="hint">Oznaka <code>{{predmet}}</code> zamjenjuje se predmetom dolazne poruke.</span></label>' +
         '<label class="f">Tekst odgovora<textarea id="arBody" rows="7">' + esc(st.autoreply.body) + '</textarea></label>' +
-        '<label class="chk"><input type="checkbox" id="repOn"' + (st.reportEnabled ? ' checked' : '') + '> Tjedni izvještaj voditeljima (administratorima) svaki ponedjeljak od 08:00</label>' +
-        '<div class="msg" id="arMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="arsave">Spremi</button><button class="btn" data-act="reportprev">Pregledaj izvještaj za prošli tjedan</button><button class="btn" data-act="reportsend"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji izvještaj meni</button></div>' +
+        '<label class="chk"><input type="checkbox" id="repOn"' + (st.reportEnabled ? ' checked' : '') + '> Tjedni izvještaj voditeljima (administratorima) svaki ponedjeljak od 08:00 i mjesečni izvještaj 1. u mjesecu od 08:00 (po prodavaču, s popisom izvršenih usluga)</label>' +
+        '<div class="msg" id="arMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="arsave">Spremi</button><button class="btn" data-act="reportprev">Pregledaj izvještaj za prošli tjedan</button><button class="btn" data-act="reportsend"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji izvještaj meni</button><button class="btn" data-act="reportprevm">Pregledaj mjesečni izvještaj</button><button class="btn" data-act="reportsendm"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji mjesečni izvještaj meni</button></div>' +
         '<pre class="reportbox" id="reportBox" hidden></pre></div></section>';
       h += '<section class="panel-b"><header><h3>Predlošci e-mailova</h3><span class="muted">oznake: {{ime}} {{tvrtka}} {{usluga}} {{moje_ime}}; potpis se dodaje sam</span></header><div class="pad">' +
         S.templates.map((t) => '<div class="tplrow" data-tid="' + esc(t.id) + '"><label class="f">Naziv<input data-f="name" value="' + esc(t.name) + '"></label><label class="f">Predmet<input data-f="subject" value="' + esc(t.subject) + '"></label>' +
@@ -445,9 +445,9 @@ function initApp() {
       toast('Postavke spremljene'); refresh(true);
     } catch (e) { m.textContent = e.message; }
   }
-  async function reportPreview() {
+  async function reportPreview(monthly) {
     const box = $('reportBox');
-    try { const r = await call('report_preview', null, 'GET'); box.textContent = r.text; box.hidden = false; }
+    try { const r = await call('report_preview' + (monthly ? '&period=month' : ''), null, 'GET'); box.textContent = r.text; box.hidden = false; }
     catch (e) { toast(e.message, true); }
   }
   async function tplSave(row) {
@@ -753,7 +753,9 @@ function initApp() {
       else if (act === 'remfollow') { S.lastFocus = a; openClient(a.dataset.cid, true); openMail('Follow-up bez'); }
       else if (act === 'sigsave') sigSave();
       else if (act === 'arsave') arSave();
-      else if (act === 'reportprev') reportPreview();
+      else if (act === 'reportprev') reportPreview(false);
+      else if (act === 'reportprevm') reportPreview(true);
+      else if (act === 'reportsendm') safe(() => call('report_send', { monthly: true }).then((r) => { if (r.ok === false) throw new Error(r.error || 'Slanje nije uspjelo.'); toast('Mjesečni izvještaj poslan na ' + r.to); }));
       else if (act === 'reportsend') safe(() => call('report_send', {}).then((r) => { if (r.ok === false) throw new Error(r.error || 'Slanje nije uspjelo.'); toast('Izvještaj poslan na ' + r.to); }));
       else if (act === 'tplsave') tplSave(a.closest('.tplrow'));
       else if (act === 'tpldel') { if (confirm('Obrisati predložak?')) safe(() => call('template_delete', { id: a.closest('.tplrow').dataset.tid }), 'Predložak obrisan').then((ok) => { if (ok) refresh(true).then(renderSettings); }); }
