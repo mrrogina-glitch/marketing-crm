@@ -379,3 +379,11 @@ ul.audit .what{flex:1 1 280px;color:var(--ink)}
 #v-kampanje .foot .msg{margin-right:auto}
 #v-kampanje .panel-b{margin-bottom:16px}
 #v-kampanje table.rev td:not(.nums){text-align:left}
+.mcsample{border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:8px 0}
+.mcsample summary{cursor:pointer}
+.mcmail{margin-top:8px}.mcsubj{font-weight:600;margin-bottom:6px}
+.mcmail pre{white-space:pre-wrap;font:inherit;margin:0;background:var(--bg);padding:10px;border-radius:6px}
+.mcrec{max-height:200px;overflow:auto;margin:8px 0;padding-left:18px;font-size:13px}
+.mcwhen{border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin:12px 0;display:flex;flex-direction:column;gap:8px}
+#mcModal .foot{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}.chip.bad{background:var(--bad-soft);color:var(--bad)}

@@ -60,6 +60,7 @@ function initApp() {
   const fmtTime = (ts) => { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
   const fmtYmd = (s) => { if (!s) return ''; const p = s.split('-'); return p[2] + '.' + p[1] + '.' + p[0] + '.'; };
   const daysAgo = (ts) => { const a = new Date(ts); a.setHours(0, 0, 0, 0); const b = new Date(); b.setHours(0, 0, 0, 0); return Math.round((b - a) / 864e5); };
+  document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) setTab(g.dataset.goto); });
   const pl3 = (n, a, b, c) => ((n % 10 === 1 && n % 100 !== 11) ? a : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? b : c));
   const plural = (n, one, many) => ((n % 10 === 1 && n % 100 !== 11) ? one : many);
   const rel = (ts) => { if (!ts) return 'nikad'; const n = daysAgo(ts); if (n <= 0) return 'danas'; if (n === 1) return 'jučer'; return 'prije ' + n + ' ' + plural(n, 'dan', 'dana'); };
@@ -110,7 +111,7 @@ function initApp() {
       S.csrf = d.csrf || S.csrf;
       if (S.offline) { S.offline = false; renderBanner(); }
       if (d.unchanged) return;
-      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
+      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.approvals = d.approvals || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
       S.loaded = true;
       derive();
       renderAll(); updateDrawer();
@@ -166,6 +167,7 @@ function initApp() {
     if (S.offline) h = '<div class="banner" role="status">Nema veze s poslužiteljem. Pokušavam ponovno.</div>';
     else if (S.loaded && !S.mail.enabled) h = '<div class="banner info" role="status">Slanje e-maila još nije podešeno. ' + (isAdmin() ? 'Upišite podatke sandučića u config.php.' : 'Obavijestite administratora.') + '</div>';
     else if (S.loaded && S.mail.error) h = '<div class="banner" role="status">Zadnje osvježavanje pošte nije uspjelo.' + (isAdmin() && S.mail.error !== 'error' ? ' ' + esc(S.mail.error) : '') + '</div>';
+    if (S.loaded && isAdmin() && (S.approvals || []).length) h += '<div class="banner info" role="status">Grupne e-mail poruke čekaju vaše odobrenje: <b>' + S.approvals.length + '</b> (' + esc(S.approvals.map((a) => a.user).filter((v, i, x) => x.indexOf(v) === i).join(', ')) + '). <button class="btn sm" data-goto="kampanje">Pregledaj i odobri</button></div>';
     $('banner').innerHTML = h;
   }
   const ADMIN_TABS = ['tim'];
@@ -176,6 +178,7 @@ function initApp() {
       $('t-postavke').textContent = isAdmin() ? 'Postavke' : 'Moj račun';
       if (!tabAllowed(S.tab)) { S.tab = 'pregled'; try { location.hash = 'pregled'; } catch (e) { /* ignore */ } }
     }
+    { const n = isAdmin() ? (S.approvals || []).length : 0; const el = $('t-kampanje'); if (el.dataset.b !== String(n)) { el.dataset.b = String(n); el.innerHTML = 'E-mail kampanje' + (n ? ' <span class="badge">' + n + '</span>' : ''); } }
     TABS.forEach((t) => { $('t-' + t).setAttribute('aria-selected', String(S.tab === t)); $('v-' + t).hidden = S.tab !== t; });
     const n = unreadCount(); const b = $('inboxBadge');
     b.hidden = n === 0; b.textContent = n > 99 ? '99+' : String(n);
@@ -1056,34 +1059,61 @@ function initApp() {
         '<div class="spell" id="mcSpell" aria-live="polite"></div>' +
         '<div class="foot"><span class="msg" id="mcMsg" role="alert"></span><button class="btn" data-mc="spell">Provjeri pravopis</button><button class="btn primary" data-mc="send" id="mcSend">Pošalji</button></div>' +
         '</div></section>' +
-        '<section class="panel-b" id="mcQueue"></section><section class="panel-b" id="mcStats"></section>';
-      root.addEventListener('click', mcClick); root.addEventListener('change', mcChange); root.addEventListener('input', mcInput);
+        '<section class="panel-b" id="mcApprove" hidden></section><section class="panel-b" id="mcQueue"></section><section class="panel-b" id="mcStats"></section>';
+      root.addEventListener('click', mcClick); $('mcModal').addEventListener('click', mcClick); root.addEventListener('change', mcChange); root.addEventListener('input', mcInput);
       mcMode(M.mode); Object.keys(M.stat).forEach((k) => { const i = root.querySelector('input[data-mc=stat][value=' + k + ']'); if (i) i.checked = !!M.stat[k]; });
     }
     renderMcQueue(); renderMcStats(); loadMcOverview();
+  }
+  const mcLim = () => { const o = mcState().ov; return { n: o ? o.perHour : 45, w: o ? 'od ' + o.window.replace('–', ' do ') : 'od 02:00 do 19:00' }; };
+  function mcHintText() {
+    if (!$('mcHint')) return;
+    $('mcHint').textContent = mcState().mode === 'group' ? 'Oznake {{ime}}, {{tvrtka}}, {{usluga}} i {{moje_ime}} svakom se primatelju popune osobno. Potpis prodavača dodaje se automatski. Slanje: najviše ' + mcLim().n + ' poruka na sat, ' + mcLim().w + (isAdmin() ? '.' : '. Grupne poruke korisnika šalju se tek nakon odobrenja administratora.') : 'Oznake {{ime}}, {{tvrtka}} i {{usluga}} popunjavaju se podacima odabranog klijenta. Potpis se dodaje automatski.';
   }
   function mcMode(m) {
     const M = mcState(); M.mode = m; M.ack = false;
     $('mcSingle').hidden = m !== 'single'; $('mcGroup').hidden = m !== 'group';
     document.querySelectorAll('#v-kampanje [data-mc=mode]').forEach((b) => b.classList.toggle('on', b.dataset.v === m));
-    $('mcHint').textContent = m === 'group' ? 'Oznake {{ime}}, {{tvrtka}}, {{usluga}} i {{moje_ime}} svakom se primatelju popune osobno. Potpis prodavača dodaje se automatski. Slanje: najviše 50 poruka na sat, od 05:00 do 16:00.' : 'Oznake {{ime}}, {{tvrtka}} i {{usluga}} popunjavaju se podacima odabranog klijenta. Potpis se dodaje automatski.';
-    $('mcSend').textContent = m === 'group' ? 'Stavi u red za slanje' : 'Pošalji e-mail';
+    mcHintText();
+    $('mcSend').textContent = m === 'group' ? 'Pregled i slanje' : 'Pošalji e-mail';
   }
   async function loadMcOverview() {
     if (S.mcBusy) return; S.mcBusy = true;
-    try { mcState().ov = await call('mail_overview', null, 'GET'); if (S.tab === 'kampanje') renderMcQueue(); } catch (e) { /* ignore */ } finally { S.mcBusy = false; }
+    try { mcState().ov = await call('mail_overview', null, 'GET'); if (S.tab === 'kampanje') { renderMcQueue(); mcHintText(); } } catch (e) { /* ignore */ } finally { S.mcBusy = false; }
+  }
+  const mcSamples = (list) => list.map((m, i) => '<details class="mcsample"' + (i === 0 ? ' open' : '') + '><summary><b>' + esc(m.name) + '</b> <small>' + esc(m.to) + (m.sender ? ' · pošiljatelj: ' + esc(m.sender) : '') + '</small></summary><div class="mcmail"><div class="mcsubj">' + esc(m.subject) + '</div><pre>' + esc(m.body) + '</pre></div></details>').join('');
+  function mcModal(html) { const o = $('mcModal'); o.querySelector('.sh-b').innerHTML = html; o.hidden = false; }
+  function mcModalClose() { $('mcModal').hidden = true; }
+  async function mcBatchView(batch, admin) {
+    try {
+      const d = await call('batch_detail', { batch });
+      mcModal('<p class="mcline"><b>' + esc(d.by) + '</b> · ' + d.total + ' ' + pl3(d.total, 'primatelj', 'primatelja', 'primatelja') + ' · slanje: ' + (d.sendAt > Date.now() + 60000 ? 'zakazano za ' + esc(fmtTs(d.sendAt)) : 'što prije') + '</p>' +
+        '<h4>Primjeri poruka (točno kako će stići primateljima)</h4>' + mcSamples(d.samples) +
+        '<details class="info"><summary>Svi primatelji (' + d.total + ')</summary><ul class="mcrec">' + d.recipients.map((r) => '<li>' + esc(r) + '</li>').join('') + '</ul></details>' +
+        '<div class="foot">' + (admin && d.status === 'awaiting' ? '<button class="btn danger" data-mc="decide" data-d="reject" data-b="' + esc(batch) + '">Odbij</button><button class="btn primary" data-mc="decide" data-d="approve" data-b="' + esc(batch) + '">Odobri slanje</button>' : '<button class="btn" data-mc="pvclose">Zatvori</button>') + '</div>');
+    } catch (e) { toast(e.message, true); }
   }
   function renderMcQueue() {
     const el = $('mcQueue'); if (!el) return; const o = mcState().ov;
+    const ap = $('mcApprove');
+    if (ap) {
+      const L = isAdmin() && o ? o.approvals : [];
+      ap.hidden = !L.length;
+      ap.innerHTML = L.length ? '<header><h3>Čeka odobrenje <span class="badge">' + L.length + '</span></h3><span class="muted">poruke se ne šalju dok ih ne odobrite</span></header><div class="pad"><div class="tblwrap"><table class="rev"><thead><tr><th>Prodavač</th><th>Predmet</th><th>Primatelja</th><th>Slanje</th><th></th></tr></thead><tbody>' +
+        L.map((a) => '<tr><td>' + esc(a.user) + '</td><td>' + esc(a.subject) + '</td><td class="nums">' + a.total + '</td><td>' + (a.sendAt > Date.now() + 60000 ? esc(fmtTs(a.sendAt)) : 'što prije') + '</td><td class="acts"><button class="btn sm" data-mc="view" data-b="' + esc(a.batch) + '" data-a="1">Pregled</button> <button class="btn sm primary" data-mc="decide" data-d="approve" data-b="' + esc(a.batch) + '">Odobri</button> <button class="btn sm danger" data-mc="decide" data-d="reject" data-b="' + esc(a.batch) + '">Odbij</button></td></tr>').join('') + '</tbody></table></div></div>' : '';
+    }
     if (!o) { el.innerHTML = '<header><h3>Red slanja</h3></header><p class="muted pad">Učitavanje…</p>'; return; }
     const eta = o.eta ? new Date(o.eta) : null;
     let h = '<header><h3>Red slanja grupne pošte</h3><span class="muted">najviše ' + o.perHour + ' poruka na sat, termin ' + esc(o.window) + '</span></header><div class="pad">' +
       '<p class="mcline"><span class="chip ' + (o.windowOpen ? 'ok' : '') + '">' + (o.windowOpen ? 'Slanje je sada dopušteno' : 'Izvan termina slanja') + '</span> <b class="nums">' + o.sentLastHour + ' / ' + o.perHour + '</b> poslano u zadnjih sat vremena · na čekanju: <b class="nums">' + o.pending + '</b>' +
       (eta && o.pending ? ' · procjena završetka: <b>' + esc(fmtTs(o.eta)) + '</b>' : '') + '</p>';
     if (o.batches.length) {
-      h += '<div class="tblwrap"><table class="rev"><thead><tr><th>Kada</th><th>Predmet</th><th>Poslano</th><th>Na čekanju</th><th>Neuspjelo</th><th></th></tr></thead><tbody>' +
-        o.batches.map((b) => '<tr><td>' + esc(fmtTs(b.created)) + '</td><td>' + esc(b.subject) + '</td><td class="nums">' + b.sent + ' / ' + b.total + '</td><td class="nums">' + b.pending + '</td><td class="nums">' + b.failed + '</td><td>' +
-          (b.pending || b.failed ? '<button class="btn sm danger" data-mc="cancel" data-b="' + esc(b.batch) + '">Otkaži preostale</button>' : (b.cancelled ? '<span class="muted">otkazano ' + b.cancelled + '</span>' : '')) + '</td></tr>').join('') + '</tbody></table></div>';
+      h += '<div class="tblwrap"><table class="rev"><thead><tr><th>Kada</th><th>Predmet</th>' + (isAdmin() ? '<th>Prodavač</th>' : '') + '<th>Poslano</th><th>Stanje</th><th></th></tr></thead><tbody>' +
+        o.batches.map((b) => {
+          const st = b.awaiting ? '<span class="chip warn">čeka odobrenje</span>' : (b.approval === 'rejected' ? '<span class="chip bad">odbijeno</span>' : (b.pending ? 'u redu: ' + b.pending + (b.sendAt > Date.now() + 60000 ? ' · zakazano ' + esc(fmtTs(b.sendAt)) : '') : (b.failed ? 'neuspjelo: ' + b.failed : (b.cancelled && !b.sent ? 'otkazano' : 'završeno'))));
+          return '<tr><td>' + esc(fmtTs(b.created)) + '</td><td>' + esc(b.subject) + '</td>' + (isAdmin() ? '<td>' + esc(b.by) + '</td>' : '') + '<td class="nums">' + b.sent + ' / ' + b.total + '</td><td>' + st + '</td><td class="acts"><button class="btn sm" data-mc="view" data-b="' + esc(b.batch) + '">Pregled</button> ' +
+            (b.pending || b.failed || b.awaiting ? '<button class="btn sm danger" data-mc="cancel" data-b="' + esc(b.batch) + '">Otkaži preostale</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
     } else h += '<p class="muted">Još nema grupnih slanja.</p>';
     el.innerHTML = h + '</div>';
   }
@@ -1168,6 +1198,27 @@ function initApp() {
       catch (e) { msg.textContent = e.message; } finally { b.disabled = false; }
       return;
     }
+    if (act === 'pvclose') { mcModalClose(); return; }
+    if (act === 'view') { mcBatchView(b.dataset.b, !!b.dataset.a || isAdmin()); return; }
+    if (act === 'decide') {
+      const ap = b.dataset.d === 'approve';
+      if (!confirm(ap ? 'Odobriti slanje? Poruke odlaze primateljima unutar dopuštenog termina.' : 'Odbiti slanje? Poruke se neće poslati.')) return;
+      const ok = await safe(() => call('batch_decide', { batch: b.dataset.b, decision: ap ? 'approve' : 'reject' }), ap ? 'Slanje odobreno' : 'Slanje odbijeno');
+      if (ok) { mcModalClose(); await refresh(true); loadMcOverview(); }
+      return;
+    }
+    if (act === 'confirmsend') {
+      const when = (document.querySelector('input[name=mcWhen]:checked') || {}).value; let at = null;
+      if (when === 'later') { const v = $('mcAt').value; at = v ? new Date(v).getTime() : 0; if (!at || at < Date.now() + 60000) { $('mcPvMsg').textContent = 'Odaberite vrijeme slanja u budućnosti.'; return; } }
+      b.disabled = true;
+      try {
+        const r = await call('bulk_send', { subject: M.pv.subject, body: M.pv.body, ids: M.pv.ids, send_at: at });
+        mcModalClose();
+        toast(r.needsApproval ? 'Poslano administratoru na odobrenje (' + r.queued + ' ' + pl3(r.queued, 'primatelj', 'primatelja', 'primatelja') + ')' : 'U red je stavljeno ' + r.queued + ' ' + pl3(r.queued, 'poruka', 'poruke', 'poruka') + (r.skipped ? ' (preskočeno: ' + r.skipped + ')' : ''));
+        M.preview = null; M.picked = new Set(); $('mcPrev').innerHTML = ''; M.ack = false; M.pv = null; loadMcOverview(); if (isAdmin()) refresh(true);
+      } catch (e) { $('mcPvMsg').textContent = e.message; b.disabled = false; }
+      return;
+    }
     if (act === 'cancel') { if (!confirm('Otkazati sve poruke iz ovog slanja koje još nisu poslane?')) return; const ok = await safe(() => call('bulk_cancel', { batch: b.dataset.b }), 'Preostale poruke otkazane'); if (ok) loadMcOverview(); return; }
     if (act === 'applyfix' && S.mcSpell) { $('mcSubj').value = S.mcSpell.subject; $('mcBody').value = S.mcSpell.body; $('mcSpell').innerHTML = '<p class="okmsg">Ispravci su primijenjeni.</p>'; M.ack = false; return; }
     if (act === 'applyai' && S.mcSpell && S.mcSpell.ai) { $('mcBody').value = S.mcSpell.ai; $('mcSpell').innerHTML = '<p class="okmsg">AI lektura je primijenjena. Pročitajte tekst prije slanja.</p>'; M.ack = false; return; }
@@ -1196,11 +1247,16 @@ function initApp() {
           const ok = await safe(() => call('email_send', { client_id: M.clientId, to: $('mcTo').value.trim(), subject, body }), 'E-mail poslan');
           if (ok) { await refresh(true); renderMcStats(); }
         } else {
-          const n = M.picked.size;
-          if (!confirm('Staviti u red ' + n + ' ' + pl3(n, 'poruku', 'poruke', 'poruka') + '?\n\nŠalje se najviše 50 poruka na sat, od 05:00 do 16:00 sati.')) return;
-          const r = await call('bulk_send', { subject, body, ids: Array.from(M.picked) });
-          toast('U red je stavljeno ' + r.queued + ' ' + pl3(r.queued, 'poruka', 'poruke', 'poruka') + (r.skipped ? ' (preskočeno: ' + r.skipped + ')' : ''));
-          M.preview = null; M.picked = new Set(); $('mcPrev').innerHTML = ''; M.ack = false; loadMcOverview();
+          const ids = Array.from(M.picked);
+          const pv = await call('bulk_preview_msg', { subject, body, ids });
+          if (!pv.total) { msg.textContent = 'Nijedan odabrani primatelj nema ispravnu adresu.'; return; }
+          M.pv = { subject, body, ids };
+          const lim = mcLim(); const d = new Date(Date.now() + 86400000); d.setHours(9, 0, 0, 0); const loc = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T09:00';
+          mcModal('<p class="mcline"><b class="nums">' + pv.total + '</b> ' + pl3(pv.total, 'primatelj', 'primatelja', 'primatelja') + '. Ovako će poruke izgledati primateljima (prikazano ' + pv.samples.length + ' primjera):</p>' + mcSamples(pv.samples) +
+            '<fieldset class="mcwhen"><legend>Slanje</legend><label class="chk"><input type="radio" name="mcWhen" value="now" checked> Što prije (najviše ' + lim.n + ' na sat, ' + esc(lim.w) + ')</label>' +
+            '<label class="chk"><input type="radio" name="mcWhen" value="later"> Zakaži za <input type="datetime-local" id="mcAt" value="' + loc + '"></label></fieldset>' +
+            (pv.needsApproval ? '<p class="banner info">Poruke se neće poslati dok ih ne odobri administrator. Administrator dobiva obavijest.</p>' : '') +
+            '<div class="msg" id="mcPvMsg" role="alert"></div><div class="foot"><button class="btn" data-mc="pvclose">Natrag na uređivanje</button><button class="btn primary" data-mc="confirmsend">' + (pv.needsApproval ? 'Pošalji na odobrenje' : 'Potvrdi i stavi u red') + '</button></div>');
         }
       } catch (e) { msg.textContent = e.message; } finally { b.disabled = false; }
     }
