@@ -633,6 +633,34 @@ function monthly_report_if_due(): bool
 
 /** Runs from cron.php and, throttled, from the app. */
 /** Moves the client's current campaign into the history (if it has dates). Usluga i prodavač se bilježe uz kampanju. */
+/* ---------- povijest prodavača klijenta ---------- */
+
+function record_owner(int $clientId, ?int $ownerId, int $t): void
+{
+    if ($ownerId) {
+        run('INSERT INTO owner_history (client_id, owner_id, from_at) VALUES (?, ?, ?)', [$clientId, $ownerId, $t]);
+    }
+}
+
+/** Prodavač koji je vodio klijenta u zadanom trenutku (ms); prodaja se računa njemu. */
+function owner_at(int $clientId, int $atMs, $fallback = null)
+{
+    static $cache = null;
+    if ($cache === null) {
+        $cache = [];
+        foreach (rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id') as $r) {
+            $cache[(int) $r['client_id']][] = [(int) $r['from_at'], (int) $r['owner_id']];
+        }
+    }
+    $o = null;
+    foreach ($cache[$clientId] ?? [] as [$from, $own]) {
+        if ($from <= $atMs) {
+            $o = $own;
+        }
+    }
+    return $o ?? ($cache[$clientId][0][1] ?? $fallback);
+}
+
 function archive_campaign(array $c, int $userId): void
 {
     if (empty($c['camp_end'])) {
@@ -736,11 +764,13 @@ function revenue_report(array $u): array
     $admin = $u['role'] === 'admin';
     $from = date('Y-m-d', strtotime('-400 days'));
     $items = [];
-    foreach (rows('SELECT start_date, end_date, value, service, owner_id FROM campaigns') as $r) {
-        $items[] = [($r['start_date'] ?: $r['end_date']), (float) $r['value'], (string) $r['service'], $r['owner_id']];
+    foreach (rows('SELECT client_id, start_date, end_date, value, service, owner_id FROM campaigns') as $r) {
+        $d0 = ($r['start_date'] ?: $r['end_date']);
+        $items[] = [$d0, (float) $r['value'], (string) $r['service'], $d0 ? owner_at((int) $r['client_id'], (int) (strtotime($d0 . ' 23:59:59') * 1000), $r['owner_id']) : $r['owner_id']];
     }
-    foreach (rows('SELECT camp_start, camp_end, camp_value, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
-        $items[] = [($r['camp_start'] ?: $r['camp_end']), (float) $r['camp_value'], (string) $r['service'], $r['owner_id']];
+    foreach (rows('SELECT id, camp_start, camp_end, camp_value, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
+        $d1 = ($r['camp_start'] ?: $r['camp_end']);
+        $items[] = [$d1, (float) $r['camp_value'], (string) $r['service'], $d1 ? owner_at((int) $r['id'], (int) (strtotime($d1 . ' 23:59:59') * 1000), $r['owner_id']) : $r['owner_id']];
     }
     $w = [];
     $m = [];

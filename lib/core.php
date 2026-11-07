@@ -254,6 +254,11 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        12 => [
+            "CREATE TABLE owner_history (id $pk, client_id $big NOT NULL, owner_id $big NOT NULL, from_at $big NOT NULL)$opt",
+            "CREATE INDEX ix_ownerhist_client ON owner_history (client_id, from_at)",
+            "INSERT INTO owner_history (client_id, owner_id, from_at) SELECT id, owner_id, created_at FROM clients WHERE owner_id IS NOT NULL",
+        ],
         11 => [
             "ALTER TABLE emails ADD deleted_at $big NULL",
         ],
