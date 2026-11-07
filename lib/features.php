@@ -1050,3 +1050,24 @@ function campaign_queue(array $t, array $fallback): array
     }
     return ['queued' => $queued, 'skipped' => $skipped, 'sendAt' => $at];
 }
+
+
+/** Popis poruka za Inbox; dolazne poruke na koje je odgovoreno nose tko je odgovorio i kada. */
+function email_list_out(array $rowsIn): array
+{
+    $replies = [];
+    foreach (rows("SELECT in_reply_to, user_id, msg_date FROM emails WHERE direction = 'out' AND in_reply_to IS NOT NULL AND in_reply_to <> '' AND deleted_at IS NULL ORDER BY msg_date, id") as $r) {
+        $replies[trim((string) $r['in_reply_to'], "<> \t")] = [$r['user_id'], (int) $r['msg_date']];
+    }
+    $out = [];
+    foreach ($rowsIn as $r) {
+        $o = email_out($r);
+        $k = trim((string) ($r['message_id'] ?? ''), "<> \t");
+        if ($r['direction'] === 'in' && $k !== '' && isset($replies[$k]) && $replies[$k][0] !== null) {
+            $o['repliedBy'] = (string) $replies[$k][0];
+            $o['repliedAt'] = $replies[$k][1];
+        }
+        $out[] = $o;
+    }
+    return $out;
+}
