@@ -344,11 +344,12 @@ function initApp() {
     const root = $('v-pregled');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
     if (!S.clients.length) { root.innerHTML = emptyHtml() + (isAdmin() ? '<section class="panel-b" id="usagePanel" style="margin-top:16px"></section>' : ''); if (isAdmin()) { renderUsage(); loadUsage(); } return; }
-    const open = S.clients.filter(isOpen);
-    const won = S.clients.filter((c) => c.status === 'dobiven');
+    const mine = isAdmin() ? S.clients : S.clients.filter((c) => String(c.ownerId) === String(S.me.id)); // prodavač na Pregledu vidi samo svoje klijente
+    const open = mine.filter(isOpen);
+    const won = mine.filter((c) => c.status === 'dobiven');
     const due = open.filter(isDue).sort((a, b) => a.nextFollowUp.localeCompare(b.nextFollowUp));
     const stale = open.filter(isStale).sort((a, b) => lastTs(a) - lastTs(b));
-    const rem = S.reminders.filter((r) => byId(r.clientId));
+    const rem = isAdmin() ? S.reminders.filter((r) => byId(r.clientId)) : [];
     const pend = S.scheduled.filter((x) => x.status === 'pending' || x.status === 'sending');
     let h = '';
     if (rem.length) {
@@ -364,8 +365,8 @@ function initApp() {
       '<div><div class="k">Javiti se danas</div><div class="v' + (due.length ? ' warn' : '') + '">' + due.length + '</div><div class="s">' + due.filter((c) => c.nextFollowUp < today()).length + ' kasni</div></div>' +
       '<div><div class="k">Bez nedavnog kontakta</div><div class="v' + (stale.length ? ' warn' : '') + '">' + stale.length + '</div><div class="s">' + STALE_DAYS + ' dana ili dulje</div></div>' +
       '<div><div class="k">Dobiveno</div><div class="v">' + won.length + '</div><div class="s">' + eur(sumVal(won)) + '</div></div></div>';
-    if (pend.length) h += '<p class="hint">Zakazano slanje: ' + pend.length + ' ' + plural(pend.length, 'poruka', 'poruka') + ' (Inbox > Zakazano slanje).</p>';
-    const ending = S.clients.filter(campSoon).sort((a, b) => a.campEnd.localeCompare(b.campEnd));
+    if (isAdmin() && pend.length) h += '<p class="hint">Zakazano slanje: ' + pend.length + ' ' + plural(pend.length, 'poruka', 'poruka') + ' (Inbox > Zakazano slanje).</p>';
+    const ending = mine.filter(campSoon).sort((a, b) => a.campEnd.localeCompare(b.campEnd));
     if (ending.length) {
       h += '<section class="panel-b"><header><h3>Kampanje koje istječu za 7 dana</h3><span class="muted">ljubičasto: dnevne i kampanje kraće od 7 dana</span></header><ul class="list">' +
         ending.map((c) => campLi(c)).join('') + '</ul></section>';
@@ -376,6 +377,7 @@ function initApp() {
     h += stale.length ? '<ul class="list">' + stale.slice(0, 8).map((c) => { const t = lastTs(c); return rowLi(c, t ? 'zadnje ' + rel(t) : 'nema bilješki', 'stale'); }).join('') + '</ul>' : '<div class="none">Svi otvoreni klijenti imaju svježu bilješku.</div>';
     h += '</section></div>';
     const tot = S.clients.length;
+    if (!isAdmin()) { root.innerHTML = h; return; }
     h += '<section class="panel-b"><header><h3>Tijek prodaje</h3><span class="muted nums">' + tot + ' ' + plural(tot, 'klijent', 'klijenata') + '</span></header><div class="pipe"><div class="pipe-bar" role="img" aria-label="Raspodjela klijenata po statusu">' +
       STAGES.map((s) => { const n = S.clients.filter((c) => c.status === s.id).length; return n ? '<i style="flex:' + n + ';background:var(--s-' + s.id + ')" title="' + esc(s.label) + ': ' + n + '"></i>' : ''; }).join('') +
       '</div><div class="pipe-leg">' +
@@ -1200,7 +1202,7 @@ function initApp() {
   renderTabs(); renderAll();
   refresh(true).then(() => { if (S.tab === 'postavke') renderSettings(); if (S.tab === 'inbox') syncInbox(false, true); });
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 20000);
-  setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'pregled') { loadUsage(); loadRevenue(true); } if (document.visibilityState === 'visible' && S.tab === 'tim') loadAudit(); }, 60000);
+  setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'pregled') { loadUsage(); if (isAdmin()) loadRevenue(true); } if (document.visibilityState === 'visible' && S.tab === 'tim') loadAudit(); }, 60000);
   setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'inbox') syncInbox(false, true); }, 120000);
 }
 })();
