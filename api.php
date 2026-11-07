@@ -230,8 +230,7 @@ try {
             $lastSync = (int) (meta_get('imap_last_sync') ?? 0);
             $lastErr = (string) (meta_get('imap_last_error') ?? '');
             $dc = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM documents');
-            $templates = array_map(static fn ($t) => ['id' => (string) $t['id'], 'name' => (string) $t['name'], 'subject' => (string) $t['subject'], 'body' => (string) $t['body']],
-                rows('SELECT id, name, subject, body FROM templates ORDER BY sort_order, id'));
+            $templates = array_map('template_out', rows('SELECT * FROM templates ORDER BY sort_order, id'));
             $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE status IN ('pending', 'sending') OR (status = 'failed' AND send_at > ?) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
             $reminders = array_map('reminder_out', reminders_due($u));
             $settings = null;
@@ -628,15 +627,56 @@ try {
             $name = f_str($in, 'name', 120, 'Naziv predloška', true);
             $subject = f_str($in, 'subject', 255, 'Predmet', true);
             $text = f_str($in, 'body', 10000, 'Tekst predloška', true);
+            $kind = ($in['kind'] ?? '') === 'akcija' ? 'akcija' : 'email';
+            $mode = in_array($in['send_mode'] ?? '', ['delay', 'fixed'], true) ? $in['send_mode'] : 'manual';
+            $days = max(0, min(60, (int) ($in['send_days'] ?? 1)));
+            $time = preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string) ($in['send_time'] ?? '')) ? (string) $in['send_time'] : '09:00';
+            $fixed = $mode === 'fixed' && !empty($in['send_fixed']) ? (int) $in['send_fixed'] : null;
+            if ($mode === 'fixed' && $fixed === null) {
+                throw new ApiError('Odaberite datum i vrijeme slanja.');
+            }
+            $aud = $kind === 'akcija' ? clean_audience($in['audience'] ?? []) : ['groups' => [], 'kind' => 'sve', 'owner' => ''];
+            if ($kind === 'akcija' && !$aud['groups']) {
+                throw new ApiError('Odaberite barem jednu skupinu primatelja.');
+            }
+            $inputs = [];
+            foreach ((is_array($in['inputs'] ?? null) ? $in['inputs'] : []) as $k => $v) {
+                if (in_array($k, ['naziv', 'ponuda', 'popust', 'rok', 'kontakt', 'ton'], true) && is_string($v)) {
+                    $inputs[$k] = mb_substr(trim($v), 0, 1000);
+                }
+            }
+            $vals = [$name, $subject, $text, $kind, $mode, $days, $time, $fixed, json_encode($aud), json_encode($inputs ?: new stdClass()), ms()];
             if (!empty($in['id'])) {
-                if (run('UPDATE templates SET name = ?, subject = ?, body = ?, updated_at = ? WHERE id = ?', [$name, $subject, $text, ms(), (int) $in['id']]) === 0 && !row('SELECT id FROM templates WHERE id = ?', [(int) $in['id']])) {
+                if (run('UPDATE templates SET name = ?, subject = ?, body = ?, kind = ?, send_mode = ?, send_days = ?, send_time = ?, send_fixed = ?, audience = ?, inputs = ?, updated_at = ? WHERE id = ?', array_merge($vals, [(int) $in['id']])) === 0 && !row('SELECT id FROM templates WHERE id = ?', [(int) $in['id']])) {
                     throw new ApiError('Predložak ne postoji.', 404);
                 }
             } else {
                 $max = row('SELECT COALESCE(MAX(sort_order), 0) AS m FROM templates');
-                run('INSERT INTO templates (name, subject, body, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)', [$name, $subject, $text, (int) $max['m'] + 1, ms()]);
+                run('INSERT INTO templates (name, subject, body, kind, send_mode, send_days, send_time, send_fixed, audience, inputs, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', array_merge($vals, [(int) $max['m'] + 1]));
             }
             out(['ok' => true]);
+        }
+
+        case 'campaign_preview': {
+            $u = need_write();
+            need_admin($u);
+            $in = body();
+            $list = campaign_recipients(is_array($in['audience'] ?? null) ? $in['audience'] : []);
+            out(['ok' => true, 'count' => count($list), 'sample' => array_map(static fn ($c) => (string) $c['name'], array_slice($list, 0, 8))]);
+        }
+
+        case 'campaign_send': {
+            $u = need_write();
+            need_admin($u);
+            if (!Mailer::configured()) {
+                throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
+            }
+            $t = row("SELECT * FROM templates WHERE id = ? AND kind = 'akcija'", [(int) (body()['id'] ?? 0)]);
+            if (!$t) {
+                throw new ApiError('Akcija ne postoji. Najprije je spremite.', 404);
+            }
+            $r = transaction(static fn () => campaign_queue($t, $u));
+            out(['ok' => true] + $r);
         }
 
         case 'template_delete': {
