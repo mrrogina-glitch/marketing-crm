@@ -4,7 +4,7 @@
   --bg:#F1F5F4; --surface:#FFFFFF; --sunken:#E8EEEC; --ink:#142022; --ink-2:#47585B; --ink-3:#6B7D81; --line:#D6DFDD;
   --accent:#0A6A72; --accent-ink:#FFFFFF; --accent-soft:#DCEFF0;
   --warn:#8F5600; --warn-soft:#FAEACB; --bad:#AE3B2B; --bad-soft:#F7DCD6; --good:#1B7A47;
-  --s-novi:#7F8F9C; --s-kontaktiran:#3D78CC; --s-ponuda:#BF8410; --s-pregovori:#8659CC; --s-dobiven:#2A9A5A; --s-izgubljen:#B5524A;
+  --s-novi:#7F8F9C; --s-kontaktiran:#3D78CC; --s-ponuda:#BF8410; --s-pregovori:#8659CC; --s-aktivni:#0E8C86; --s-dobiven:#2A9A5A; --s-izgubljen:#B5524A;
   --short:#6B3FC4; --short-soft:#E9E0F8;
   --scrim:rgba(10,24,26,.45);
   --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -15,7 +15,7 @@
     --bg:#0D1517; --surface:#141E21; --sunken:#1A2629; --ink:#E3EDEE; --ink-2:#A2B3B6; --ink-3:#7F9296; --line:#26363A;
     --accent:#4DC1C9; --accent-ink:#05181A; --accent-soft:#143539;
     --warn:#E6B260; --warn-soft:#3A2D14; --bad:#F0907F; --bad-soft:#3B1F1B; --good:#66CC90;
-    --s-novi:#93A3B0; --s-kontaktiran:#6BA2EE; --s-ponuda:#E2AE45; --s-pregovori:#AE8CEE; --s-dobiven:#52C384; --s-izgubljen:#E0807A;
+    --s-novi:#93A3B0; --s-kontaktiran:#6BA2EE; --s-ponuda:#E2AE45; --s-pregovori:#AE8CEE; --s-aktivni:#3CC4BC; --s-dobiven:#52C384; --s-izgubljen:#E0807A;
     --short:#B99CF2; --short-soft:#2D2345;
     --scrim:rgba(0,0,0,.6);
   }

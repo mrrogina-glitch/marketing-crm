@@ -31,7 +31,7 @@ function initApp() {
   const STAGES = [
     { id: 'novi', label: 'Novi kontakt' }, { id: 'kontaktiran', label: 'Kontaktiran' },
     { id: 'ponuda', label: 'Ponuda poslana' }, { id: 'pregovori', label: 'Pregovori' },
-    { id: 'dobiven', label: 'Dobiven' }, { id: 'izgubljen', label: 'Izgubljen' },
+    { id: 'aktivni', label: 'Aktivni' }, { id: 'dobiven', label: 'Dobiven' }, { id: 'izgubljen', label: 'Izgubljen' },
   ];
   const STAGE = Object.fromEntries(STAGES.map((s) => [s.id, s]));
   const OPEN = { novi: 1, kontaktiran: 1, ponuda: 1, pregovori: 1 };
@@ -681,7 +681,7 @@ function initApp() {
       '<label class="f">Vrijednost kampanje (€) <span class="req">*</span><input id="iCampValue" type="number" min="0" step="10" inputmode="decimal" value="' + esc(c.campValue || '') + '"></label></div>' +
       (campExpired ? '<div class="renew" id="iRenew"><b>Kampanja je završila ' + esc(fmtYmd(c.campEnd)) + ' Upišite novu kampanju:</b><div class="grid2"><label class="f">Od<input id="rStart" type="date" value="' + today() + '"></label><label class="f">Do <span class="req">*</span><input id="rEnd" type="date"></label><label class="f">Vrijednost (€) <span class="req">*</span><input id="rValue" type="number" min="0" step="10" inputmode="decimal"></label></div><div class="msg" id="rMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="renew">Spremi novu kampanju</button></div></div>' : '') +
       (campHist.length ? '<div class="campnote">Prošle kampanje</div><ul class="camphist">' + campHist.map((x) => '<li>' + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + ' · <b>' + esc(eur(x.value)) + '</b></li>').join('') + '</ul>' : '') +
-      '<span class="campnote">Vrijedi samo uz aktivnu kampanju. Kampanje kraće od 7 dana (i dnevne) označene su ljubičasto. Kad kampanja završi, upišite novu s terminom i vrijednošću.</span></div></div>' +
+      '<span class="campnote">Vrijedi samo uz aktivnu kampanju. Kampanje kraće od 7 dana (i dnevne) označene su ljubičasto. Klijent s aktivnom kampanjom ima status Aktivni; kad kampanji istekne termin, automatski postaje Izgubljen. Za novu kampanju ponovno označite Aktivni i upišite termin i vrijednost u eurima.</span></div></div>' +
       '<div class="msg" id="iMsg" role="alert"></div><div class="row-btns start" style="margin-top:6px"><button class="btn" data-act="saveinfo">Spremi podatke</button></div></details>' +
       (canDelete(c) ? '<div class="danger-z"><button class="btn danger sm" data-act="del1">Obriši klijenta</button><span id="delConfirm" hidden><span class="hint">Briše klijenta i sve njegove bilješke. Ne može se poništiti. </span><button class="btn danger sm" data-act="del2">Da, obriši</button></span></div>' : '') + '</div>';
     $('dSheet').innerHTML = h;
