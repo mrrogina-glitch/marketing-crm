@@ -612,7 +612,7 @@ function report_text(?int $now = null, bool $monthly = false): array
     }
     $unlinked = $cnt("SELECT COUNT(*) AS c FROM emails WHERE deleted_at IS NULL AND direction = 'in' AND client_id IS NULL AND msg_date >= ? AND msg_date < ?", [$from, $to]);
     $company = company_name();
-    $text = $title . ': ' . $label . "\n" . ($company !== '' ? $company . ' · Prodajni stol' : 'Prodajni stol') . "\n\n"
+    $text = $title . ': ' . $label . "\n" . ($company !== '' ? $company . ' · VIP MARKET' : 'VIP MARKET') . "\n\n"
         . "UKUPNO\n"
         . '  novi klijenti: ' . $tot['new'] . "\n"
         . '  dobiveni poslovi: ' . $tot['won'] . ($tot['won'] ? ' (' . eur_text($tot['wonv']) . ')' : '') . "\n"
