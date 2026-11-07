@@ -6,11 +6,50 @@ declare(strict_types=1);
  * Settings: config.php, section "imap" (falls back to the "mail" credentials).
  */
 
+/* ---------- Inbox 2: podaci spremljeni iz Postavki (lozinka je šifrirana) ---------- */
+
+function imap2_key(): string
+{
+    return hash('sha256', 'imap2|' . (string) cfg('db.pass', '') . '|' . (string) cfg('install_key', ''), true);
+}
+
+function imap2_encrypt(string $plain): string
+{
+    if (!function_exists('openssl_encrypt')) {
+        throw new ApiError('Poslužitelj nema OpenSSL pa se lozinka ne može sigurno spremiti. Upišite je u config.php.', 500);
+    }
+    $iv = random_bytes(16);
+    return base64_encode($iv . openssl_encrypt($plain, 'aes-256-cbc', imap2_key(), OPENSSL_RAW_DATA, $iv));
+}
+
+function imap2_decrypt(string $enc): string
+{
+    $raw = base64_decode($enc, true);
+    if ($raw === false || strlen($raw) < 17 || !function_exists('openssl_decrypt')) {
+        return '';
+    }
+    $r = openssl_decrypt(substr($raw, 16), 'aes-256-cbc', imap2_key(), OPENSSL_RAW_DATA, substr($raw, 0, 16));
+    return $r === false ? '' : $r;
+}
+
+/** Inbox 2 settings saved through the Postavke page, or null. Includes the decrypted password. */
+function imap2_stored(): ?array
+{
+    $j = setting_get('imap2');
+    $d = $j ? json_decode($j, true) : null;
+    if (!is_array($d) || empty($d['host']) || empty($d['user'])) {
+        return null;
+    }
+    $d['pass'] = imap2_decrypt((string) ($d['pass_enc'] ?? ''));
+    unset($d['pass_enc']);
+    return $d;
+}
+
 /** $box 1 = glavni sandučić (config 'imap'), 2 = dodatni sandučić samo za primanje (config 'imap2'). */
 function imap_cfg(int $box = 1): ?array
 {
     if ($box === 2) {
-        $i2 = cfg('imap2');
+        $i2 = imap2_stored() ?? cfg('imap2');
         if (!is_array($i2) || empty($i2['user']) || empty($i2['pass'])) {
             return null;
         }
