@@ -417,7 +417,7 @@ try {
             $dc = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM documents');
             $tasks = tasks_for($u);
             $templates = array_map('template_out', rows('SELECT * FROM templates ORDER BY sort_order, id'));
-            $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE status IN ('pending', 'sending') OR (status = 'failed' AND send_at > ?) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
+            $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE bulk = 0 AND (status IN ('pending', 'sending') OR (status = 'failed' AND send_at > ?)) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
             $reminders = array_map('reminder_out', reminders_due($u));
             $settings = null;
             if ($u['role'] === 'admin') {
@@ -425,7 +425,7 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$tasks, count(rows('SELECT id FROM owner_history')), $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
+            $rev = md5(json_encode([$u['role'] === 'admin' ? pending_approvals() : [], $tasks, count(rows('SELECT id FROM owner_history')), $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -440,6 +440,7 @@ try {
                 'notes' => $notes,
                 'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'tasks' => $tasks,
+                'approvals' => $u['role'] === 'admin' ? pending_approvals() : [],
                 'ownerHist' => array_map(static fn ($r) => [(string) $r['client_id'], (int) $r['from_at'], (string) $r['owner_id']], rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id')),
                 'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
@@ -986,6 +987,22 @@ try {
             out(['ok' => true, 'clients' => $list, 'total' => $n, 'noEmail' => $r['noEmail'], 'eta' => bulk_eta(bulk_pending_count() + $n)]);
         }
 
+        case 'bulk_preview_msg': {
+            $u = need_write();
+            $in = body();
+            $subject = f_str($in, 'subject', 255, 'Predmet', true);
+            $text = f_str($in, 'body', 20000, 'Poruka', true);
+            $ids = array_values(array_filter(array_map('intval', is_array($in['ids'] ?? null) ? $in['ids'] : [])));
+            $cl = [];
+            foreach ($ids as $id) {
+                $c = row('SELECT * FROM clients WHERE id = ?', [$id]);
+                if ($c && ($u['role'] === 'admin' || (int) $c['owner_id'] === (int) $u['id']) && filter_var(trim((string) $c['email']), FILTER_VALIDATE_EMAIL)) {
+                    $cl[] = $c;
+                }
+            }
+            out(['ok' => true, 'total' => count($cl), 'samples' => bulk_samples($subject, $text, $cl, $u, 5), 'needsApproval' => $u['role'] !== 'admin']);
+        }
+
         case 'bulk_send': {
             $u = need_write();
             $in = body();
@@ -1001,23 +1018,77 @@ try {
             if (!$ids) {
                 throw new ApiError('Odaberite barem jednog primatelja.');
             }
-            $r = transaction(static fn () => bulk_queue($u, $ids, $subject, $text));
+            $at = null;
+            if (!empty($in['send_at'])) {
+                $at = (int) $in['send_at'];
+                if ($at < ms() + 60000 || $at > ms() + 366 * DAY_MS) {
+                    throw new ApiError('Vrijeme slanja mora biti u budućnosti (najviše godinu dana unaprijed).');
+                }
+            }
+            $r = transaction(static fn () => bulk_queue($u, $ids, $subject, $text, $at));
             if ($r['queued'] === 0) {
                 throw new ApiError('Nijedna poruka nije stavljena u red' . ($r['skipped'] ? ' (primatelji su već dobili poruku s istim predmetom u zadnjih 30 dana ili nemaju ispravnu adresu).' : '.'));
             }
+            if ($r['needsApproval']) {
+                audit(null, (int) $u['id'], 'update', 'Grupna e-mail poruka čeka odobrenje: "' . $subject . '" (' . $r['queued'] . ' primatelja)', '');
+            }
             out(['ok' => true] + $r + ['eta' => bulk_eta(bulk_pending_count())]);
+        }
+
+        case 'batch_detail': {
+            $u = need_write();
+            $b = row('SELECT * FROM mail_batches WHERE batch = ?', [(string) (body()['batch'] ?? '')]);
+            if (!$b || ($u['role'] !== 'admin' && (int) $b['user_id'] !== (int) $u['id'])) {
+                throw new ApiError('Slanje ne postoji.', 404);
+            }
+            $rowsx = rows('SELECT s.client_id, s.to_email, s.subject, s.body, s.user_id FROM scheduled_emails s WHERE s.batch = ? ORDER BY s.id', [$b['batch']]);
+            $samples = [];
+            foreach (array_slice($rowsx, 0, 5) as $r) {
+                $su = row('SELECT * FROM users WHERE id = ?', [$r['user_id']]);
+                $c = row('SELECT name FROM clients WHERE id = ?', [$r['client_id']]);
+                $samples[] = ['to' => (string) $r['to_email'], 'name' => (string) ($c['name'] ?? ''), 'sender' => (string) ($su['name'] ?? ''), 'subject' => (string) $r['subject'],
+                    'body' => $su ? with_signature((string) $r['body'], $su) : (string) $r['body']];
+            }
+            $names = [];
+            foreach ($rowsx as $r) {
+                $c = row('SELECT name FROM clients WHERE id = ?', [$r['client_id']]);
+                $names[] = ($c['name'] ?? '?') . ' <' . $r['to_email'] . '>';
+            }
+            out(['ok' => true, 'batch' => (string) $b['batch'], 'by' => user_name_of($b['user_id']), 'status' => (string) $b['status'], 'sendAt' => (int) $b['send_at'], 'total' => count($rowsx), 'samples' => $samples, 'recipients' => array_slice($names, 0, 300)]);
+        }
+
+        case 'batch_decide': {
+            $u = need_write();
+            need_admin($u);
+            $in = body();
+            $b = row('SELECT * FROM mail_batches WHERE batch = ?', [(string) ($in['batch'] ?? '')]);
+            if (!$b) {
+                throw new ApiError('Slanje ne postoji.', 404);
+            }
+            if ($b['status'] !== 'awaiting') {
+                throw new ApiError('O ovom slanju je već odlučeno.', 409);
+            }
+            $approve = ($in['decision'] ?? '') === 'approve';
+            transaction(static function () use ($b, $u, $approve): void {
+                run("UPDATE scheduled_emails SET status = ? WHERE batch = ? AND status = 'awaiting'", [$approve ? 'pending' : 'cancelled', $b['batch']]);
+                run('UPDATE mail_batches SET status = ?, decided_by = ?, decided_at = ? WHERE batch = ?', [$approve ? 'approved' : 'rejected', $u['id'], ms(), $b['batch']]);
+            });
+            audit(null, (int) $u['id'], 'update', ($approve ? 'Odobreno' : 'Odbijeno') . ' grupno slanje: "' . $b['subject'] . '" (' . user_name_of($b['user_id']) . ', ' . $b['total'] . ' primatelja)', '');
+            out(['ok' => true]);
         }
 
         case 'bulk_cancel': {
             $u = need_write();
             $batch = (string) (body()['batch'] ?? '');
-            $sql = "UPDATE scheduled_emails SET status = 'cancelled' WHERE batch = ? AND bulk = 1 AND status IN ('pending','failed')";
+            $sql = "UPDATE scheduled_emails SET status = 'cancelled' WHERE batch = ? AND bulk = 1 AND status IN ('awaiting','pending','failed')";
             $p = [$batch];
             if ($u['role'] !== 'admin') {
                 $sql .= ' AND user_id = ?';
                 $p[] = $u['id'];
             }
-            out(['ok' => true, 'cancelled' => run($sql, $p)]);
+            $n = run($sql, $p);
+            run("UPDATE mail_batches SET status = 'cancelled' WHERE batch = ? AND status = 'awaiting'" . ($u['role'] !== 'admin' ? ' AND user_id = ' . (int) $u['id'] : ''), [$batch]);
+            out(['ok' => true, 'cancelled' => $n]);
         }
 
         case 'template_save': {

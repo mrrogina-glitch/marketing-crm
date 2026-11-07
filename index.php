@@ -155,6 +155,14 @@ $v = static function (string $f): string {
   </form>
 </div>
 
+<!-- e-mail kampanje: pregled poruke -->
+<div class="overlay center" id="mcModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mcModalT">
+    <div class="sh-h"><div><h2 id="mcModalT">Pregled poruke</h2></div><button type="button" class="x" data-mc="pvclose" aria-label="Zatvori">×</button></div>
+    <div class="sh-b"></div>
+  </div>
+</div>
+
 <!-- new e-mail to client -->
 <div class="overlay center" id="mMail" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mTitle">
