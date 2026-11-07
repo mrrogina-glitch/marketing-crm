@@ -663,9 +663,11 @@ function expire_campaigns(): int
         $t = ms();
         transaction(static function () use ($c, $t): void {
             archive_campaign($c, (int) $c['owner_id']);
-            run('UPDATE clients SET camp_active = 0, camp_start = NULL, camp_end = NULL, camp_value = 0, status = ?, updated_at = ? WHERE id = ?', ['izgubljen', $t, $c['id']]);
+            $lose = $c['status'] === 'aktivni'; // dobiven/izgubljen i ostali ručno postavljeni statusi ostaju
+            run('UPDATE clients SET camp_active = 0, camp_start = NULL, camp_end = NULL, camp_value = 0, status = ?, updated_at = ? WHERE id = ?', [$lose ? 'izgubljen' : $c['status'], $t, $c['id']]);
+            $why = 'Kampanja je završila ' . date('d.m.Y.', strtotime($c['camp_end'])) . ', vrijednost ' . number_format((float) $c['camp_value'], 2, ',', '.') . ' €.';
             run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
-                [$c['id'], $c['owner_id'], 'status', STAGE_LABELS[$c['status']] . ' → Izgubljen' . "\n" . 'Kampanja je završila ' . date('d.m.Y.', strtotime($c['camp_end'])) . ', vrijednost ' . number_format((float) $c['camp_value'], 2, ',', '.') . ' €.', $t]);
+                [$c['id'], $c['owner_id'], $lose ? 'status' : 'note', $lose ? STAGE_LABELS['aktivni'] . ' → Izgubljen' . "\n" . $why : $why, $t]);
         });
         $n++;
     }
