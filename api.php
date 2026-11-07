@@ -70,12 +70,11 @@ function need_admin(array $u): void
 
 /* ---------- output shapes ---------- */
 
-/** @return array{0:int,1:?string,2:?string} camp_active, camp_start, camp_end from the request */
+/** @return array{0:int,1:?string,2:?string,3:string} camp_active, camp_start, camp_end, camp_value from the request */
 function f_campaign(array $in): array
 {
-    $active = !empty($in['camp_active']);
-    if (!$active) {
-        return [0, null, null];
+    if (empty($in['camp_active'])) {
+        return [0, null, null, '0.00'];
     }
     $end = f_date($in['camp_end'] ?? '');
     if ($end === null) {
@@ -85,7 +84,20 @@ function f_campaign(array $in): array
     if ($start > $end) {
         throw new ApiError('Početak kampanje ne može biti nakon datuma završetka.');
     }
-    return [1, $start, $end];
+    if (!isset($in['camp_value']) || trim((string) $in['camp_value']) === '') {
+        throw new ApiError('Upišite novčanu vrijednost kampanje.');
+    }
+    return [1, $start, $end, f_value($in['camp_value'])];
+}
+
+/** Moves the client's current campaign into the history (if it has dates). */
+function archive_campaign(array $c, int $userId): void
+{
+    if (empty($c['camp_end'])) {
+        return;
+    }
+    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms()]);
 }
 
 function client_out(array $r): array
@@ -106,6 +118,7 @@ function client_out(array $r): array
         'campActive' => (int) ($r['camp_active'] ?? 0) === 1,
         'campStart' => !empty($r['camp_start']) ? (string) $r['camp_start'] : '',
         'campEnd' => !empty($r['camp_end']) ? (string) $r['camp_end'] : '',
+        'campValue' => (float) ($r['camp_value'] ?? 0),
         'createdAt' => (int) $r['created_at'],
         'updatedAt' => (int) $r['updated_at'],
         'wonAt' => $r['won_at'] !== null ? (int) $r['won_at'] : null,
@@ -292,6 +305,7 @@ try {
         case 'bootstrap': {
             $u = need_user();
             $a = row('SELECT COUNT(*) AS c, COALESCE(MAX(updated_at), 0) AS m, COALESCE(SUM(value), 0) AS s FROM clients');
+            $cg = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM campaigns');
             $b = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM notes');
             $em = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m, COALESCE(SUM(CASE WHEN read_at IS NULL THEN 0 ELSE 1 END), 0) AS r, COALESCE(SUM(COALESCE(client_id, 0)), 0) AS k FROM emails');
             $usersOut = users_out($u);
@@ -311,7 +325,7 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$a, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
+            $rev = md5(json_encode([$a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -325,6 +339,7 @@ try {
                 'clients' => $clients,
                 'notes' => $notes,
                 'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails ORDER BY msg_date DESC, id DESC LIMIT 600')),
+                'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
                 'templates' => $templates,
                 'scheduled' => $scheduled,
@@ -358,14 +373,14 @@ try {
             $status = f_status($in['status'] ?? 'novi');
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
             $fu = f_date($in['next_follow_up'] ?? '');
-            [$campA, $campS, $campE] = f_campaign($in);
+            [$campA, $campS, $campE, $campV] = f_campaign($in);
             $note = f_text($in, 'note', 'Prva bilješka');
             $mailId = !empty($in['email_id']) ? (int) load_email((string) $in['email_id'])['id'] : null;
             $t = ms();
-            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $note, $t, $u, $campA, $campS, $campE): int {
-                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE]);
+            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $note, $t, $u, $campA, $campS, $campE, $campV): int {
+                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE, $campV]);
                 $cid = insert_id();
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
                 return $cid;
@@ -376,6 +391,24 @@ try {
                 sync_document_clients();
             }
             out(['ok' => true, 'id' => (string) $id]);
+        }
+
+        case 'campaign_renew': {
+            $u = need_write();
+            $in = body();
+            $c = load_client((string) ($in['client_id'] ?? ''));
+            [, $ns, $ne, $nv] = f_campaign(['camp_active' => 1, 'camp_start' => $in['start'] ?? '', 'camp_end' => $in['end'] ?? '', 'camp_value' => $in['value'] ?? '']);
+            if ((int) $c['camp_active'] === 1 && !empty($c['camp_end']) && $c['camp_end'] >= date('Y-m-d')) {
+                throw new ApiError('Kampanja još traje. Nova se upisuje nakon završetka ili odznačite Aktivni.');
+            }
+            $t = ms();
+            transaction(static function () use ($c, $u, $ns, $ne, $nv, $t): void {
+                archive_campaign($c, (int) $u['id']);
+                run('UPDATE clients SET camp_active = 1, camp_start = ?, camp_end = ?, camp_value = ?, updated_at = ? WHERE id = ?', [$ns, $ne, $nv, $t, $c['id']]);
+                run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
+                    [$c['id'], $u['id'], 'note', 'Nova kampanja: ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', vrijednost ' . number_format((float) $nv, 2, ',', '.') . ' €', $t]);
+            });
+            out(['ok' => true]);
         }
 
         case 'client_update': {
@@ -395,8 +428,11 @@ try {
             run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
                 [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $owner, $fu, ms(), $c['id']]);
             if (array_key_exists('camp_active', $in)) {
-                [$campA, $campS, $campE] = f_campaign($in);
-                run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ? WHERE id = ?', [$campA, $campS, $campE, $c['id']]);
+                [$campA, $campS, $campE, $campV] = f_campaign($in);
+                if ($campA === 0 && (int) $c['camp_active'] === 1) {
+                    archive_campaign($c, (int) $u['id']); // kampanja je završena ili prekinuta: ostaje u povijesti
+                }
+                run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $c['id']]);
             }
             link_emails_to_client((int) $c['id'], strtolower($email));
             out(['ok' => true]);
@@ -413,6 +449,7 @@ try {
                 run("UPDATE scheduled_emails SET status = 'cancelled' WHERE client_id = ? AND status = 'pending'", [$c['id']]);
                 run('UPDATE emails SET client_id = NULL WHERE client_id = ?', [$c['id']]);
                 run('DELETE FROM notes WHERE client_id = ?', [$c['id']]);
+                run('DELETE FROM campaigns WHERE client_id = ?', [$c['id']]);
                 run('DELETE FROM clients WHERE id = ?', [$c['id']]);
             });
             out(['ok' => true]);
