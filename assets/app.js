@@ -45,7 +45,7 @@ function initApp() {
   const S = {
     csrf: meta ? meta.content : '', rev: '', loaded: false, offline: false,
     me: { id: '', name: '', email: '', role: 'sales' }, users: [], usersById: {},
-    clients: [], campaigns: [], notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '', imap2Cfg: null },
+    clients: [], campaigns: [], tasks: [], revenue: null, revPeriod: 'weekly', revUser: '', audit: null, notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '', imap2Cfg: null },
     byClient: new Map(), clientsById: new Map(), inByClient: new Map(),
     tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', sort: 'activity', iq: '', iFilter: 'all', period: '7',
     openId: null, pendingStatus: null, mailClient: null, mailDocs: new Set(), nFromMail: null, nGuess: '', reportText: '', openMailId: null, lastFocus: null, refreshing: false, syncing: false,
@@ -109,7 +109,7 @@ function initApp() {
       S.csrf = d.csrf || S.csrf;
       if (S.offline) { S.offline = false; renderBanner(); }
       if (d.unchanged) return;
-      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
+      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
       S.loaded = true;
       derive();
       renderAll(); updateDrawer();
@@ -202,6 +202,144 @@ function initApp() {
   const emptyHtml = () => '<div class="empty"><h2>Još nema klijenata</h2><p>Dodajte prvog klijenta. Uz svakog klijenta obavezna je bilješka, pa se cijela povijest razgovora vidi na jednom mjestu.</p><div class="row-btns"><button class="btn primary" data-act="new">Dodaj klijenta</button></div></div>';
   const rowLi = (c, right, cls) => '<li><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.service ? ' · ' + esc(c.service) : '') + '</small></span><span class="b ' + cls + '">' + right + '</span></button></li>';
 
+
+  /* ---------- zadaci ---------- */
+  const tomorrow = () => ymd(new Date(Date.now() + 864e5));
+  const taskLi = (t, withClient) => {
+    const c = t.clientId ? byId(t.clientId) : null; const d = dayDiff(today(), t.due);
+    const cls = t.doneAt ? 'ok' : d < 0 ? 'late' : d === 0 ? 'today' : '';
+    const when = t.doneAt ? 'završeno' : d < 0 ? 'kasni ' + (-d) + ' ' + plural(-d, 'dan', 'dana') : d === 0 ? 'danas' : d === 1 ? 'sutra' : fmtYmd(t.due);
+    return '<li class="task' + (t.doneAt ? ' done' : '') + '"><button class="tick" data-act="taskdone" data-id="' + esc(t.id) + '" data-done="' + (t.doneAt ? '' : '1') + '" aria-label="' + (t.doneAt ? 'Vrati u otvorene' : 'Označi završenim') + '">' + (t.doneAt ? '✓' : '') + '</button>' +
+      '<span class="a"><b>' + esc(t.title) + '</b><small>' + (withClient && c ? '<button class="lnk" data-open="' + esc(c.id) + '">' + esc(c.name) + '</button> · ' : '') + (isAdmin() ? esc(person(t.assigneeId)) + ' · ' : '') + 'rok ' + esc(fmtYmd(t.due)) + '</small></span>' +
+      '<span class="b ' + cls + '">' + when + '</span><button class="x" data-act="taskdel" data-id="' + esc(t.id) + '" aria-label="Obriši zadatak">×</button></li>';
+  };
+  const taskForm = (p, cid) => '<div class="tkform"><input id="' + p + 'Title" placeholder="Novi zadatak, npr. poslati ponudu" maxlength="300" aria-label="Zadatak">' +
+    '<input id="' + p + 'Due" type="date" value="' + tomorrow() + '" aria-label="Rok">' +
+    (cid ? '' : '<input id="' + p + 'Client" list="tkClients" placeholder="Klijent (nije obavezno)" aria-label="Klijent"><datalist id="tkClients">' + S.clients.map((c) => '<option value="' + esc(c.name) + '"></option>').join('') + '</datalist>') +
+    (!cid && isAdmin() ? '<select id="' + p + 'Who" aria-label="Izvršitelj">' + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === S.me.id ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>' : '') +
+    '<button class="btn primary sm" data-act="taskadd" data-p="' + p + '"' + (cid ? ' data-cid="' + esc(cid) + '"' : '') + '>Dodaj zadatak</button></div>';
+  function tasksPanel() {
+    const open = S.tasks.filter((t) => !t.doneAt).sort((a, b) => a.due.localeCompare(b.due) || Number(a.id) - Number(b.id));
+    const done = S.tasks.filter((t) => t.doneAt).sort((a, b) => b.doneAt - a.doneAt);
+    const late = open.filter((t) => t.due < today()).length;
+    return '<section class="panel-b"><header><h3>Zadaci</h3><span class="muted">' + open.length + ' otvoreno' + (late ? ' · <b class="lt">' + late + ' kasni</b>' : '') + '</span></header>' +
+      (open.length ? '<ul class="list tasks">' + open.map((t) => taskLi(t, true)).join('') + '</ul>' : '<p class="muted pad">Nema otvorenih zadataka.</p>') +
+      taskForm('tk', '') +
+      (done.length ? '<details class="tkdone"><summary>Završeno zadnjih 7 dana (' + done.length + ')</summary><ul class="list tasks">' + done.map((t) => taskLi(t, true)).join('') + '</ul></details>' : '') + '</section>';
+  }
+  async function taskAdd(btn) {
+    const p = btn.dataset.p; let cid = btn.dataset.cid || '';
+    const title = $(p + 'Title').value.trim(), due = $(p + 'Due').value;
+    if (title.length < 3) { toast('Upišite zadatak (barem 3 znaka).', true); $(p + 'Title').focus(); return; }
+    if (!due) { toast('Odaberite rok zadatka.', true); return; }
+    if (!cid && $(p + 'Client') && $(p + 'Client').value.trim()) {
+      const f = S.clients.find((c) => c.name === $(p + 'Client').value.trim());
+      if (!f) { toast('Klijent nije pronađen. Odaberite ga s popisa.', true); return; }
+      cid = f.id;
+    }
+    const who = $(p + 'Who') ? $(p + 'Who').value : '';
+    const ok = await safe(() => call('task_create', { title, due, client_id: cid || undefined, assignee_id: who || undefined }), 'Zadatak dodan');
+    if (ok) { $(p + 'Title').value = ''; await refresh(true); }
+  }
+  async function taskAct(btn) {
+    const done = btn.dataset.act === 'taskdone';
+    if (!done && !confirm('Obrisati zadatak?')) return;
+    const ok = await safe(() => call(done ? 'task_done' : 'task_delete', { id: btn.dataset.id, done: !!btn.dataset.done }));
+    if (ok) await refresh(true);
+  }
+
+  /* ---------- prihod od kampanja ---------- */
+  const MONTHS = ['siječanj', 'veljača', 'ožujak', 'travanj', 'svibanj', 'lipanj', 'srpanj', 'kolovoz', 'rujan', 'listopad', 'studeni', 'prosinac'];
+  function revPeriods(kind, n) {
+    const out = []; const now = new Date();
+    if (kind === 'weekly') {
+      const d = new Date(now); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      for (let i = 0; i < (n || 8); i++) { const s = new Date(d); s.setDate(d.getDate() - 7 * i); const e = new Date(s); e.setDate(s.getDate() + 6); out.push({ key: ymd(s), label: pad(s.getDate()) + '.' + pad(s.getMonth() + 1) + '. – ' + pad(e.getDate()) + '.' + pad(e.getMonth() + 1) + '.' }); }
+    } else {
+      for (let i = 0; i < (n || 6); i++) { const m = new Date(now.getFullYear(), now.getMonth() - i, 1); out.push({ key: m.getFullYear() + '-' + pad(m.getMonth() + 1), label: MONTHS[m.getMonth()] + ' ' + m.getFullYear() + '.' }); }
+    }
+    return out;
+  }
+  /* ---------- statistika po korisniku (Tijek prodaje) ---------- */
+  const stageByLabel = Object.fromEntries(STAGES.map((s) => [s.label, s.id]));
+  function pipeStats() {
+    const kind = S.stKind || 'weekly'; const per = revPeriods(kind, 12); const idx = Math.min(S.stIdx || 0, per.length - 1); const p = per[idx];
+    let from, to;
+    if (kind === 'weekly') { from = new Date(p.key + 'T00:00:00'); to = new Date(from); to.setDate(to.getDate() + 7); }
+    else { const [y, m] = p.key.split('-').map(Number); from = new Date(y, m - 1, 1); to = new Date(y, m, 1); }
+    const f = from.getTime(), t = to.getTime();
+    const users = isAdmin() ? S.users.filter((u) => u.active || S.clients.some((c) => c.ownerId === u.id)) : S.users.filter((u) => u.id === S.me.id);
+    const stat = {}; users.forEach((u) => { stat[u.id] = { n: 0, mv: {}, wonV: 0 }; });
+    S.clients.forEach((c) => { if (stat[c.ownerId] && c.createdAt >= f && c.createdAt < t) stat[c.ownerId].n++; });
+    S.notes.forEach((n) => {
+      if (n.type !== 'status' || n.createdAt < f || n.createdAt >= t) return;
+      const c = byId(n.clientId); if (!c || !stat[c.ownerId]) return;
+      const mm = /→ ([^\n]+)/.exec(n.text || n.body || ''); const st = mm && stageByLabel[mm[1].trim()]; if (!st) return;
+      stat[c.ownerId].mv[st] = (stat[c.ownerId].mv[st] || 0) + 1;
+      if (st === 'dobiven') stat[c.ownerId].wonV += c.value || 0;
+    });
+    const cols = ['kontaktiran', 'ponuda', 'pregovori', 'aktivni', 'dobiven', 'izgubljen'];
+    const tot = { n: 0, mv: {}, wonV: 0 }; Object.values(stat).forEach((x) => { tot.n += x.n; tot.wonV += x.wonV; cols.forEach((k) => { tot.mv[k] = (tot.mv[k] || 0) + (x.mv[k] || 0); }); });
+    const row = (name, x, b) => '<tr' + (b ? ' class="tot"' : '') + '><th>' + esc(name) + '</th><td class="nums">' + x.n + '</td>' + cols.map((k) => '<td class="nums">' + (x.mv[k] || 0) + (k === 'dobiven' && x.wonV ? ' <small>(' + eur(x.wonV) + ')</small>' : '') + '</td>').join('') + '</tr>';
+    return '<div class="pstats"><div class="revbar"><h4>Statistika po korisniku</h4><div class="seg"><button class="' + (kind === 'weekly' ? 'on' : '') + '" data-act="stper" data-v="weekly">Tjedno</button><button class="' + (kind === 'monthly' ? 'on' : '') + '" data-act="stper" data-v="monthly">Mjesečno</button></div>' +
+      '<label class="f inl">' + (kind === 'weekly' ? 'Tjedan' : 'Mjesec') + '<select id="stPeriod">' + per.map((x, i) => '<option value="' + i + '"' + (i === idx ? ' selected' : '') + '>' + esc(x.label) + (i === 0 ? ' (tekući)' : '') + '</option>').join('') + '</select></label></div>' +
+      '<div class="tblwrap"><table class="rev"><thead><tr><th>Prodavač</th><th>Novi klijenti</th>' + cols.map((k) => '<th>' + esc(STAGE[k].label) + '</th>').join('') + '</tr></thead><tbody>' +
+      users.map((u) => row(u.name, stat[u.id])).join('') + '</tbody>' + (isAdmin() && users.length > 1 ? '<tfoot>' + row('Ukupno', tot, true) + '</tfoot>' : '') + '</table></div>' +
+      '<p class="muted pad small">Brojevi pokazuju koliko je klijenata prešlo u pojedini status u odabranom razdoblju; klijenti se računaju njihovom prodavaču.</p></div>';
+  }
+  async function loadRevenue(force) {
+    if (S.revBusy || (!force && S.revenue && Date.now() - S.revAt < 30000)) return;
+    S.revBusy = true;
+    try { S.revenue = await call('revenue', null, 'GET'); S.revAt = Date.now(); if (S.tab === 'pregled') renderRevenue(); } catch (e) { /* ignore */ } finally { S.revBusy = false; }
+  }
+  function renderRevenue() {
+    const el = $('revPanel'); if (!el) return;
+    const R = S.revenue; const kind = S.revPeriod; const adminAll = isAdmin();
+    let h = '<header><h3>Prihod od kampanja</h3><span class="muted">' + (adminAll ? 'ukupni promet' + (S.revUser ? ': ' + esc(person(S.revUser)) : '') : 'vaše kampanje') + ' · po datumu početka kampanje</span></header>';
+    h += '<div class="revbar"><div class="seg"><button class="' + (kind === 'weekly' ? 'on' : '') + '" data-act="revper" data-v="weekly">Tjedno</button><button class="' + (kind === 'monthly' ? 'on' : '') + '" data-act="revper" data-v="monthly">Mjesečno</button></div>' +
+      (adminAll ? '<label class="f inl">Prodavač<select id="revUser"><option value="">Svi (ukupno)</option>' + S.users.filter((u) => u.active).map((u) => '<option value="' + esc(u.id) + '"' + (S.revUser === u.id ? ' selected' : '') + '>' + esc(u.name) + '</option>').join('') + '</select></label>' : '') + '</div>';
+    if (!R) { el.innerHTML = h + '<p class="muted pad">Učitavanje…</p>'; return; }
+    const data = (R[kind] || []).filter((x) => !S.revUser || x.u === S.revUser);
+    const per = revPeriods(kind);
+    const extra = Array.from(new Set(data.map((x) => x.s))).filter((s) => !SERVICES.includes(s));
+    const cols = SERVICES.concat(extra);
+    const sum = (f) => data.reduce((t, x) => t + (f(x) ? x.v : 0), 0);
+    const totals = cols.map(() => 0); let grand = 0;
+    h += '<div class="tblwrap"><table class="rev"><thead><tr><th>' + (kind === 'weekly' ? 'Tjedan' : 'Mjesec') + '</th>' + cols.map((c) => '<th>' + esc(c) + '</th>').join('') + '<th>Ukupno</th></tr></thead><tbody>' +
+      per.map((p) => { const cells = cols.map((c, i) => { const v = sum((x) => x.p === p.key && x.s === c); totals[i] += v; return '<td class="nums">' + (v ? eur(v) : '–') + '</td>'; }); const rt = sum((x) => x.p === p.key); grand += rt; return '<tr><th>' + esc(p.label) + '</th>' + cells.join('') + '<td class="nums"><b>' + (rt ? eur(rt) : '–') + '</b></td></tr>'; }).join('') +
+      '</tbody><tfoot><tr><th>Zbroj</th>' + totals.map((v) => '<td class="nums">' + (v ? eur(v) : '–') + '</td>').join('') + '<td class="nums"><b>' + eur(grand) + '</b></td></tr></tfoot></table></div>';
+    if (adminAll && !S.revUser) {
+      const owners = Array.from(new Set((R[kind] || []).map((x) => x.u)));
+      if (owners.length) {
+        const k0 = per[0].key, k1 = per[1].key, allk = per.map((p) => p.key);
+        const osum = (o, f) => (R[kind] || []).reduce((t, x) => t + (x.u === o && f(x) ? x.v : 0), 0);
+        h += '<div class="tblwrap"><table class="rev"><thead><tr><th>Po prodavaču</th><th>' + esc(per[0].label) + '</th><th>' + esc(per[1].label) + '</th><th>Zadnjih ' + per.length + '</th></tr></thead><tbody>' +
+          owners.map((o) => '<tr><th>' + esc(o === '0' ? 'Bez prodavača' : person(o)) + '</th><td class="nums">' + eur(osum(o, (x) => x.p === k0)) + '</td><td class="nums">' + eur(osum(o, (x) => x.p === k1)) + '</td><td class="nums"><b>' + eur(osum(o, (x) => allk.includes(x.p))) + '</b></td></tr>').join('') + '</tbody></table></div>';
+      }
+    }
+    h += '<p class="muted pad small">Kampanja se računa u tjedan/mjesec u kojem počinje. Ako klijent ima više usluga, vrijednost se dijeli jednako među njima.</p>';
+    el.innerHTML = h;
+  }
+
+  /* ---------- dnevnik promjena (admin) ---------- */
+  const AUD = { create: 'novo', update: 'izmjena', delete: 'brisanje', status: 'status', campaign: 'kampanja', doc: 'dokument', task: 'zadatak' };
+  const auditLi = (e, withClient) => '<li><span class="when">' + esc(fmtTs(e.at)) + '</span><span class="who">' + esc(e.user) + '</span><span class="tag">' + esc(AUD[e.action] || e.action) + '</span><span class="what">' + (withClient && e.client ? (e.clientId && byId(e.clientId) ? '<button class="lnk" data-open="' + esc(e.clientId) + '">' + esc(e.client) + '</button>: ' : '<b>' + esc(e.client) + '</b>: ') : '') + esc(e.details) + '</span></li>';
+  async function loadAudit() {
+    if (!isAdmin() || S.auditBusy) return;
+    S.auditBusy = true;
+    try { const d = await call('audit_list&limit=150', null, 'GET'); S.audit = d.entries || []; if (S.tab === 'tim') renderAudit(); } catch (e) { /* ignore */ } finally { S.auditBusy = false; }
+  }
+  function renderAudit() {
+    const el = $('auditPanel'); if (!el) return;
+    const A = S.audit;
+    el.innerHTML = '<header><h3>Dnevnik promjena</h3><span class="muted">tko je i kada mijenjao podatke · zadnjih 150</span></header>' +
+      (!A ? '<p class="muted pad">Učitavanje…</p>' : A.length ? '<ul class="audit">' + A.map((e) => auditLi(e, true)).join('') + '</ul>' : '<p class="muted pad">Još nema zapisa.</p>');
+  }
+  async function loadClientAudit(id) {
+    const key = id + ':' + S.rev; if (!isAdmin() || S.auditFor === key) return; S.auditFor = key;
+    try { const d = await call('audit_list&limit=60&client_id=' + encodeURIComponent(id), null, 'GET'); const el = $('dAudit'); if (el && S.openId === id) el.innerHTML = d.entries.length ? d.entries.map((e) => auditLi(e, false)).join('') : '<li class="muted">Nema zapisa.</li>'; } catch (e) { S.auditFor = ''; }
+  }
+
   function renderOverview() {
     const root = $('v-pregled');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
@@ -220,6 +358,7 @@ function initApp() {
           '<span class="acts"><button class="btn sm" data-act="remfollow" data-cid="' + esc(c.id) + '">Pošalji podsjetnik</button><button class="btn sm" data-act="remsnooze" data-id="' + esc(r.id) + '">Odgodi 2 dana</button><button class="btn sm" data-act="remdone" data-id="' + esc(r.id) + '">Odbaci</button></span></li>';
       }).join('') + '</ul></section>';
     }
+    h += tasksPanel();
     h += '<div class="strip">' +
       '<div><div class="k">Otvoreni klijenti</div><div class="v">' + open.length + '</div><div class="s">u radu, ' + eur(sumVal(open)) + '</div></div>' +
       '<div><div class="k">Javiti se danas</div><div class="v' + (due.length ? ' warn' : '') + '">' + due.length + '</div><div class="s">' + due.filter((c) => c.nextFollowUp < today()).length + ' kasni</div></div>' +
@@ -241,9 +380,11 @@ function initApp() {
       STAGES.map((s) => { const n = S.clients.filter((c) => c.status === s.id).length; return n ? '<i style="flex:' + n + ';background:var(--s-' + s.id + ')" title="' + esc(s.label) + ': ' + n + '"></i>' : ''; }).join('') +
       '</div><div class="pipe-leg">' +
       STAGES.map((s) => { const a = S.clients.filter((c) => c.status === s.id); return '<div><span class="nm" style="--dot:var(--s-' + s.id + ')"><i></i>' + esc(s.label) + '</span><b>' + a.length + '</b><small class="nums">' + eur(sumVal(a)) + '</small></div>'; }).join('') +
-      '</div></div></section>';
+      '</div></div>' + pipeStats() + '</section>';
+    h += '<section class="panel-b" id="revPanel"></section>';
     if (isAdmin()) h += '<section class="panel-b" id="usagePanel"></section>';
     root.innerHTML = h;
+    renderRevenue(); loadRevenue();
     if (isAdmin()) { renderUsage(); loadUsage(); }
   }
 
@@ -465,7 +606,8 @@ function initApp() {
     h += '<section class="panel-b feed"><header><h3>Zadnje aktivnosti</h3><span class="muted">svi prodavači</span></header>';
     h += feed.length ? '<ul class="list">' + feed.map((n) => { const c = byId(n.clientId); if (!c) return ''; const t = n.type === 'email' ? (n.subject || 'E-mail') : n.text;
       return '<li><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + '</b><small><span class="tag">' + esc(TYPES[n.type] || 'Bilješka') + '</span>' + esc(person(n.authorId)) + ': ' + esc(t.length > 110 ? t.slice(0, 110) + '…' : t) + '</small></span><span class="b muted">' + esc(rel(n.createdAt)) + '</span></button></li>'; }).join('') + '</ul>' : '<div class="none">Još nema zabilježenih aktivnosti.</div>';
-    root.innerHTML = h + '</section>';
+    root.innerHTML = h + '</section>' + (isAdmin() ? '<section class="panel-b" id="auditPanel"></section>' : '');
+    if (isAdmin()) { renderAudit(); loadAudit(); }
   }
 
   /* ---------- settings ---------- */
@@ -698,8 +840,10 @@ function initApp() {
       '<label class="f">Sljedeći kontakt<input id="noteFollow" type="date"></label></div><textarea id="noteText" placeholder="Što je dogovoreno ili napravljeno, i koji je sljedeći korak."></textarea>' +
       '<div class="foot"><span class="msg" id="noteMsg" role="alert"></span><button class="btn primary" data-act="note">Spremi bilješku</button></div></div></div>' +
       '<div class="sec" id="schedSec" hidden><h3>Zakazano slanje</h3><ul class="docs" id="schedList"></ul></div>' +
+      '<div class="sec"><h3>Zadaci <small id="dTkCount"></small></h3><ul class="list tasks" id="dTkList"></ul>' + taskForm('dTk', c.id) + '</div>' +
       '<div class="sec"><h3>Dokumenti <small id="docCount"></small></h3><ul class="docs" id="docList"></ul><div class="acts"><label class="btn sm filebtn">Dodaj dokument<input type="file" id="docFile" hidden></label><span class="hint" id="docMsg">najviše 10 MB po datoteci</span></div></div>' +
       '<div class="sec"><h3>Povijest <small id="tlCount"></small></h3><ol class="tl" id="tl"></ol></div>' +
+      (isAdmin() ? '<details class="info"><summary>Dnevnik promjena</summary><ul class="audit" id="dAudit"><li class="muted">Učitavanje…</li></ul></details>' : '') +
       '<details class="info"' + (campExpired ? ' open' : '') + '><summary>Podaci o klijentu</summary><div class="grid2">' +
       '<label class="f">Vrsta klijenta<select id="iKind"><option value="tvrtka"' + (c.kind !== 'osoba' ? ' selected' : '') + '>Tvrtka</option><option value="osoba"' + (c.kind === 'osoba' ? ' selected' : '') + '>Fizička osoba</option></select></label>' +
       '<label class="f"><span><span id="iNameL">' + (c.kind === 'osoba' ? 'Ime i prezime' : 'Naziv tvrtke') + '</span> <span class="req">*</span></span><input id="iName" value="' + esc(c.name) + '"></label>' +
@@ -733,6 +877,10 @@ function initApp() {
     $('docList').innerHTML = docs.length ? docs.map((d) => '<li><a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a><span class="hint">' + esc(fmtSize(d.size)) + ' · ' + fmtDate(d.createdAt) + (d.emailId ? ' · iz e-maila' : '') + '</span>' +
       ((isAdmin() || d.by === S.me.id || String(c.ownerId) === String(S.me.id)) ? '<button class="btn sm danger" data-act="docdel" data-id="' + esc(d.id) + '">Obriši</button>' : '') + '</li>').join('') : '<li class="hint">Nema dokumenata. Dodajte ponudu, ugovor ili drugi dokument.</li>';
     const sc = S.scheduled.filter((x) => x.clientId === c.id);
+    const tk = S.tasks.filter((t) => t.clientId === c.id).sort((a, b) => (a.doneAt ? 1 : 0) - (b.doneAt ? 1 : 0) || a.due.localeCompare(b.due));
+    $('dTkCount').textContent = tk.filter((t) => !t.doneAt).length ? tk.filter((t) => !t.doneAt).length + ' otvoreno' : '';
+    $('dTkList').innerHTML = tk.length ? tk.map((t) => taskLi(t, false)).join('') : '<li class="muted pad">Nema zadataka za ovog klijenta.</li>';
+    loadClientAudit(c.id);
     $('schedSec').hidden = !sc.length;
     $('schedList').innerHTML = sc.map((x) => '<li><span><b>' + esc(x.subject) + '</b> <span class="hint">' + (x.status === 'failed' ? 'nije poslano: ' + esc(x.error) : 'šalje se ' + fmtDate(x.sendAt) + ' ' + fmtTime(x.sendAt)) + ' · ' + esc(person(x.userId)) + '</span></span>' +
       (x.status !== 'sending' && (isAdmin() || x.userId === S.me.id) ? '<button class="btn sm" data-act="schedcancel" data-id="' + esc(x.id) + '">Otkaži</button>' : '') + '</li>').join('');
@@ -969,6 +1117,10 @@ function initApp() {
       else if (act === 'stno') cancelStatus();
       else if (act === 'saveinfo') saveInfo();
       else if (act === 'renew') renewCampaign();
+      else if (act === 'taskadd') taskAdd(a);
+      else if (act === 'taskdone' || act === 'taskdel') taskAct(a);
+      else if (act === 'stper') { S.stKind = a.dataset.v; S.stIdx = 0; renderOverview(); }
+      else if (act === 'revper') { S.revPeriod = a.dataset.v; renderRevenue(); }
       else if (act === 'mail') openMail('Prvi');
       else if (act === 'msend') sendMail();
       else if (act === 'del1') $('delConfirm').hidden = false;
@@ -1014,6 +1166,8 @@ function initApp() {
     else if (id === 'fStatus') { S.fStatus = ev.target.value; renderClients(); }
     else if (id === 'fOwner') { S.fOwner = ev.target.value; renderClients(); }
     else if (id === 'fKind') { S.fKind = ev.target.value; renderClients(); }
+    else if (id === 'stPeriod') { S.stIdx = Number(ev.target.value); renderOverview(); }
+    else if (id === 'revUser') { S.revUser = ev.target.value; renderRevenue(); }
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
     else if (ev.target.name === 'nKindR') applyNewKind();
     else if (ev.target.dataset && ev.target.dataset.f === 'send_mode') { const r = ev.target.closest('.tplrow'); r.querySelectorAll('[data-sch]').forEach((x) => { x.hidden = x.dataset.sch !== ev.target.value; }); }
@@ -1040,7 +1194,7 @@ function initApp() {
   renderTabs(); renderAll();
   refresh(true).then(() => { if (S.tab === 'postavke') renderSettings(); if (S.tab === 'inbox') syncInbox(false, true); });
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 20000);
-  setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'pregled') loadUsage(); }, 60000);
+  setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'pregled') { loadUsage(); loadRevenue(true); } if (document.visibilityState === 'visible' && S.tab === 'tim') loadAudit(); }, 60000);
   setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'inbox') syncInbox(false, true); }, 120000);
 }
 })();

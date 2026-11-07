@@ -318,3 +318,41 @@ fieldset.aud legend{font-weight:600;padding:0 6px}
 .svcbox{display:flex;flex-wrap:wrap;gap:6px 16px;padding:8px 0}
 .svcbox .chk{display:flex;align-items:center;gap:6px;font-weight:400}
 #v-aktivni .li .a small{white-space:normal;overflow:visible;text-overflow:clip}
+
+.pad{padding:12px 16px}.small{font-size:12px}
+.tasks li.task{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--line)}
+.tasks li.task:first-child{border-top:0}
+.tasks .a{flex:1;min-width:0;display:flex;flex-direction:column}
+.tasks .a small{color:var(--ink-2);font-size:12px}
+.tasks .b{font-size:12.5px;white-space:nowrap;color:var(--ink-2)}
+.tasks .b.late{color:var(--bad);font-weight:600}.tasks .b.today{color:var(--accent);font-weight:600}
+.tasks li.done .a b{text-decoration:line-through;color:var(--ink-2)}
+.tick{width:22px;height:22px;flex:none;border:2px solid var(--line);border-radius:50%;background:var(--surface);color:var(--accent);font-size:13px;line-height:1;cursor:pointer;padding:0}
+.tick:hover{border-color:var(--accent)}
+.tasks .x{background:none;border:0;color:var(--ink-2);font-size:18px;cursor:pointer;padding:0 4px}
+.lnk{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font:inherit;text-decoration:underline}
+.lt{color:var(--bad)}
+.tkform{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+.tkform input,.tkform select{min-width:0}
+.tkform input[type=text],.tkform input:not([type]){flex:1 1 200px}
+.tkdone{padding:6px 14px 10px;font-size:13px;color:var(--ink-2)}
+.revbar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding:10px 16px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{background:var(--surface);border:0;padding:6px 14px;cursor:pointer;color:var(--ink-2);font:inherit}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.f.inl{display:flex;flex-direction:row;align-items:center;gap:8px}
+.tblwrap{overflow-x:auto;padding:0 16px 8px}
+table.rev{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+table.rev th,table.rev td{padding:6px 8px;border-top:1px solid var(--line);text-align:right;white-space:nowrap}
+table.rev th:first-child{text-align:left;font-weight:600}
+table.rev thead th{font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-2);border-top:0}
+table.rev tfoot th,table.rev tfoot td{border-top:2px solid var(--line);font-weight:600}
+ul.audit{list-style:none;margin:0;padding:4px 16px 10px;font-size:13px}
+ul.audit li{display:flex;flex-wrap:wrap;gap:4px 10px;padding:6px 0;border-top:1px solid var(--line)}
+ul.audit li:first-child{border-top:0}
+ul.audit .when{color:var(--ink-2);min-width:92px}ul.audit .who{font-weight:600}
+ul.audit .what{flex:1 1 280px;color:var(--ink)}
+.tkform input,.tkform select{width:auto;flex:1 1 150px}
+.tkform input[id$=Title]{flex:3 1 260px}
+.tkform .btn{flex:none}
+.pstats{border-top:1px solid var(--line);margin-top:6px}.pstats h4{margin:0;font-size:14px}table.rev tr.tot th,table.rev tr.tot td{font-weight:700}
