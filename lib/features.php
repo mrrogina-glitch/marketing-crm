@@ -434,7 +434,7 @@ function notify_reminders(): int
             $lines[] = '- ' . $r['client_name'] . ': "' . $r['subject'] . '", poslano ' . date('d.m.Y.', (int) ($r['msg_date'] / 1000)) . ' (prije ' . $days . ' d)';
         }
         $text = "Pozdrav " . explode(' ', trim((string) $u['name']))[0] . ",\n\nsljedeći klijenti nisu odgovorili na Vaš e-mail:\n\n" . implode("\n", $lines)
-            . "\n\nU Prodajnom stolu (Pregled > Čekaju odgovor) možete im poslati podsjetnik, odgoditi ili odbaciti podsjetnik."
+            . "\n\nU aplikaciji VIP MARKET (Pregled > Čekaju odgovor) možete im poslati podsjetnik, odgoditi ili odbaciti podsjetnik."
             . ($url !== '' ? "\n" . $url : '');
         try {
             Mailer::send((string) $u['email'], 'Podsjetnik: ' . count($list) . ' ' . (count($list) === 1 ? 'klijent nije odgovorio' : 'klijenata nije odgovorilo'), $text, null,
