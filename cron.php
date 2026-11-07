@@ -12,6 +12,8 @@ require __DIR__ . '/lib/mail.php';
 require __DIR__ . '/lib/imap.php';
 require __DIR__ . '/lib/features.php';
 require __DIR__ . '/lib/backup.php';
+require __DIR__ . '/lib/security.php';
+require __DIR__ . '/lib/growth.php';
 
 app_boot();
 

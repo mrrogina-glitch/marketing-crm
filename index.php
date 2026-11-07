@@ -83,6 +83,7 @@ $v = static function (string $f): string {
         <option value="value">Vrijednost</option>
       </select></label>
       <span class="count nums" id="fCount"></span>
+      <span class="acts" id="clTools"></span>
     </div>
     <div class="clist" id="clist"></div>
   </section>
@@ -154,6 +155,14 @@ $v = static function (string $f): string {
       </div>
     </div>
   </form>
+</div>
+
+<!-- alati: duplikati i uvoz -->
+<div class="overlay center" id="toolModal" hidden>
+  <div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="toolModalT">
+    <div class="sh-h"><div><h2 id="toolModalT"></h2></div><button type="button" class="x" data-tool="close" aria-label="Zatvori">×</button></div>
+    <div class="sh-b"></div>
+  </div>
 </div>
 
 <!-- e-mail kampanje: pregled poruke -->

@@ -6,6 +6,9 @@ require __DIR__ . '/lib/mail.php';
 require __DIR__ . '/lib/imap.php';
 require __DIR__ . '/lib/features.php';
 require __DIR__ . '/lib/backup.php';
+require __DIR__ . '/lib/security.php';
+require __DIR__ . '/lib/growth.php';
+require __DIR__ . '/lib/dup.php';
 require __DIR__ . '/lib/mailcamp.php';
 
 app_boot();
@@ -280,9 +283,12 @@ try {
             need_post();
             $in = body();
             $ip = client_ip();
-            $recent = row('SELECT COUNT(*) AS c FROM login_attempts WHERE ip = ? AND created_at > ?', [$ip, ms() - 15 * 60 * 1000]);
-            if ((int) $recent['c'] >= 8) {
-                throw new ApiError('Previše neuspjelih pokušaja. Pokušajte ponovno za 15 minuta.', 429);
+            if ($blk = ip_block_get($ip)) {
+                throw new ApiError(ip_block_message($blk), 403);
+            }
+            if ($why = login_suspicious($in)) {
+                ip_block_add($ip, 'Pokušaj probijanja prijave: ' . $why, is_string($in['email'] ?? null) ? (string) $in['email'] : '');
+                throw new ApiError('Prijava je odbijena. Vaša IP adresa je blokirana na 24 sata.', 403);
             }
             $email = strtolower(trim((string) ($in['email'] ?? '')));
             $pass = (string) ($in['password'] ?? '');
@@ -290,19 +296,106 @@ try {
             $hash = $u ? (string) $u['pass_hash'] : password_hash('x', PASSWORD_DEFAULT);
             $ok = password_verify($pass, $hash) && $u && (int) $u['active'] === 1;
             if (!$ok) {
-                run('INSERT INTO login_attempts (ip, created_at) VALUES (?, ?)', [$ip, ms()]);
-                run('DELETE FROM login_attempts WHERE created_at < ?', [ms() - 24 * 3600 * 1000]);
+                if (login_fail($ip, $email)) {
+                    throw new ApiError('Previše neuspjelih pokušaja. Vaša IP adresa je blokirana na 24 sata.', 403);
+                }
                 throw new ApiError('E-mail ili lozinka nisu točni.', 401);
             }
-            start_session();
-            session_regenerate_id(true);
-            $_SESSION['uid'] = (int) $u['id'];
-            $_SESSION['csrf'] = bin2hex(random_bytes(32));
             if (password_needs_rehash((string) $u['pass_hash'], PASSWORD_DEFAULT)) {
                 run('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($pass, PASSWORD_DEFAULT), $u['id']]);
             }
-            run('UPDATE users SET last_login = ? WHERE id = ?', [ms(), $u['id']]);
-            open_user_session($u);
+            if (twofa_required() && !trusted_device_ok((int) $u['id'])) {
+                start_session();
+                session_regenerate_id(true);
+                $_SESSION['pend_uid'] = (int) $u['id'];
+                $_SESSION['pend_at'] = ms();
+                twofa_send_code($u);
+                out(['ok' => true, 'twofa' => true, 'email' => mask_email((string) $u['email'])]);
+            }
+            login_success_clear($ip);
+            finish_login($u);
+            out(['ok' => true]);
+        }
+
+        case 'login_verify': {
+            need_post();
+            $in = body();
+            $ip = client_ip();
+            if ($blk = ip_block_get($ip)) {
+                throw new ApiError(ip_block_message($blk), 403);
+            }
+            start_session();
+            $uid = (int) ($_SESSION['pend_uid'] ?? 0);
+            if ($uid <= 0 || (int) ($_SESSION['pend_at'] ?? 0) < ms() - 15 * 60000) {
+                throw new ApiError('Prijava je istekla. Prijavite se ponovno.', 401);
+            }
+            $u = row('SELECT * FROM users WHERE id = ? AND active = 1', [$uid]);
+            if (!$u) {
+                throw new ApiError('Prijava nije moguća.', 401);
+            }
+            $code = preg_replace('/\D/', '', (string) ($in['code'] ?? ''));
+            if (!twofa_check_code($uid, (string) $code)) {
+                if (login_fail($ip, (string) $u['email'])) {
+                    unset($_SESSION['pend_uid']);
+                    throw new ApiError('Previše neuspjelih pokušaja. Vaša IP adresa je blokirana na 24 sata.', 403);
+                }
+                throw new ApiError('Kod nije ispravan.', 401);
+            }
+            login_success_clear($ip);
+            finish_login($u);
+            if (!empty($in['remember'])) {
+                trusted_cookie_set((int) $u['id']);
+            }
+            out(['ok' => true]);
+        }
+
+        case 'login_resend': {
+            need_post();
+            start_session();
+            $uid = (int) ($_SESSION['pend_uid'] ?? 0);
+            $u = $uid > 0 ? row('SELECT * FROM users WHERE id = ? AND active = 1', [$uid]) : null;
+            if (!$u || (int) ($_SESSION['pend_at'] ?? 0) < ms() - 15 * 60000) {
+                throw new ApiError('Prijava je istekla. Prijavite se ponovno.', 401);
+            }
+            $last = row('SELECT created_at FROM login_codes WHERE user_id = ? ORDER BY id DESC LIMIT 1', [$uid]);
+            if ($last && (int) $last['created_at'] > ms() - 45000) {
+                throw new ApiError('Novi kod možete zatražiti nakon 45 sekundi.', 429);
+            }
+            if ((int) row('SELECT COUNT(*) AS c FROM login_codes WHERE user_id = ? AND created_at > ?', [$uid, ms() - 3600000])['c'] >= 5) {
+                throw new ApiError('Previše zahtjeva za kod. Pokušajte kasnije.', 429);
+            }
+            twofa_send_code($u);
+            out(['ok' => true]);
+        }
+
+        case 'security_overview': {
+            $u = need_user();
+            need_admin($u);
+            run('DELETE FROM ip_blocks WHERE until_at <= ?', [ms()]);
+            out(['twofa' => setting_get('twofa_enabled', '1') === '1', 'twofaActive' => twofa_required(), 'mailOk' => Mailer::configured(),
+                'blocks' => array_map(static fn ($b) => ['ip' => (string) $b['ip'], 'until' => (int) $b['until_at'], 'reason' => (string) $b['reason'], 'at' => (int) $b['created_at']], rows('SELECT * FROM ip_blocks ORDER BY created_at DESC LIMIT 100')),
+                'trusted' => (int) row('SELECT COUNT(*) AS c FROM trusted_devices WHERE expires_at > ?', [ms()])['c']]);
+        }
+
+        case 'security_save': {
+            $u = need_write();
+            need_admin($u);
+            $in = body();
+            setting_set('twofa_enabled', !empty($in['twofa']) ? '1' : '0');
+            if (!empty($in['revoke_trusted'])) {
+                run('DELETE FROM trusted_devices');
+            }
+            audit(null, (int) $u['id'], 'security', 'Prijava u dva koraka: ' . (!empty($in['twofa']) ? 'uključena' : 'isključena') . (!empty($in['revoke_trusted']) ? ', pouzdani uređaji poništeni' : ''));
+            out(['ok' => true]);
+        }
+
+        case 'ip_unblock': {
+            $u = need_write();
+            need_admin($u);
+            $ip = substr((string) (body()['ip'] ?? ''), 0, 45);
+            run('DELETE FROM ip_blocks WHERE ip = ?', [$ip]);
+            run('DELETE FROM login_attempts WHERE ip = ?', [$ip]);
+            audit(null, (int) $u['id'], 'security', 'Odblokirana IP adresa ' . $ip);
             out(['ok' => true]);
         }
 
@@ -426,7 +519,12 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$u['role'] === 'admin' ? pending_approvals() : [], $tasks, count(rows('SELECT id FROM owner_history')), $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
+            $alertsOut = alerts_for($u);
+            $dncN = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM do_not_contact');
+            if ($u['role'] === 'admin' && !(string) cfg('app.url', '') && preg_match('/^[A-Za-z0-9.-]+(:\d+)?$/', (string) ($_SERVER['HTTP_HOST'] ?? '')) && meta_get('base_url') === null) {
+                meta_set('base_url', (is_https() ? 'https://' : 'http://') . $_SERVER['HTTP_HOST']);
+            }
+            $rev = md5(json_encode([$alertsOut, $dncN, $u['role'] === 'admin' ? pending_approvals() : [], $tasks, count(rows('SELECT id FROM owner_history')), $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -442,6 +540,8 @@ try {
                 'emails' => email_list_out(rows('SELECT id, message_id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'tasks' => $tasks,
                 'approvals' => $u['role'] === 'admin' ? pending_approvals() : [],
+                'alerts' => $alertsOut,
+                'dnc' => array_map(static fn ($r) => (string) $r['email'], rows('SELECT email FROM do_not_contact')),
                 'ownerHist' => array_map(static fn ($r) => [(string) $r['client_id'], (int) $r['from_at'], (string) $r['owner_id']], rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id')),
                 'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
@@ -650,6 +750,9 @@ try {
             $in = body();
             $c = load_client((string) ($in['client_id'] ?? ''));
             $to = f_email($in, 'to', true);
+            if (dnc_has($to) && !($u['role'] === 'admin' && !empty($in['force']))) {
+                throw new ApiError('Ova adresa je na popisu "ne kontaktirati" (odjava ili zahtjev klijenta). ' . ($u['role'] === 'admin' ? 'Administrator može poslati poruku uz potvrdu.' : 'Poruka nije poslana.'), 409);
+            }
             $subject = f_str($in, 'subject', 255, 'Predmet', true);
             if (preg_match('/[\r\n]/', $subject)) {
                 throw new ApiError('Predmet mora biti u jednom retku.');
@@ -985,7 +1088,7 @@ try {
             $list = array_map(static fn ($c) => ['id' => (string) $c['id'], 'name' => (string) $c['name'], 'email' => (string) $c['email'], 'status' => (string) $c['status'],
                 'owner' => user_name_of($c['owner_id']), 'mails' => $stat[(int) $c['id']][0] ?? 0, 'last' => $stat[(int) $c['id']][1] ?? null], array_slice($r['clients'], 0, 1000));
             $n = count($r['clients']);
-            out(['ok' => true, 'clients' => $list, 'total' => $n, 'noEmail' => $r['noEmail'], 'eta' => bulk_eta(bulk_pending_count() + $n)]);
+            out(['ok' => true, 'clients' => $list, 'total' => $n, 'noEmail' => $r['noEmail'], 'dnc' => $r['dnc'] ?? 0, 'eta' => bulk_eta(bulk_pending_count() + $n)]);
         }
 
         case 'bulk_preview_msg': {
@@ -1189,6 +1292,178 @@ try {
             exit;
         }
 
+        case 'alert_done': {
+            $u = need_write();
+            $id = (int) (body()['id'] ?? 0);
+            run('UPDATE alerts SET done_at = ? WHERE id = ? AND user_id = ? AND done_at IS NULL', [ms(), $id, $u['id']]);
+            out(['ok' => true]);
+        }
+
+        case 'dnc_list': {
+            need_user();
+            out(['list' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'email' => (string) $r['email'], 'client' => $r['client_id'] !== null ? (string) $r['client_id'] : '', 'reason' => (string) $r['reason'],
+                'source' => (string) $r['source'], 'at' => (int) $r['created_at']], rows('SELECT * FROM do_not_contact ORDER BY created_at DESC, id DESC LIMIT 2000'))]);
+        }
+
+        case 'dnc_add': {
+            $u = need_write();
+            $in = body();
+            $email = strtolower(f_email($in, 'email', true));
+            $reason = f_str($in, 'reason', 190, 'Razlog') ?: 'Dodano ručno';
+            if (!dnc_add($email, $reason, 'manual', (int) $u['id'])) {
+                throw new ApiError('Adresa je već na popisu.', 409);
+            }
+            out(['ok' => true]);
+        }
+
+        case 'dnc_remove': {
+            $u = need_write();
+            need_admin($u);
+            $r = row('SELECT * FROM do_not_contact WHERE id = ?', [(int) (body()['id'] ?? 0)]);
+            if (!$r) {
+                throw new ApiError('Zapis ne postoji.', 404);
+            }
+            run('DELETE FROM do_not_contact WHERE id = ?', [$r['id']]);
+            audit($r['client_id'] !== null ? (int) $r['client_id'] : null, (int) $u['id'], 'dnc', 'Uklonjen s popisa ne kontaktirati: ' . $r['email']);
+            out(['ok' => true]);
+        }
+
+        case 'dup_scan': {
+            $u = need_user();
+            need_admin($u);
+            $groups = dup_groups();
+            $cl = [];
+            foreach ($groups as $g) {
+                foreach ($g['ids'] as $id) {
+                    $cl[$id] = true;
+                }
+            }
+            $info = [];
+            if ($cl) {
+                $in = implode(',', array_map('intval', array_keys($cl)));
+                foreach (rows('SELECT * FROM clients WHERE id IN (' . $in . ')') as $c) {
+                    $cnt = row('SELECT (SELECT COUNT(*) FROM notes WHERE client_id = ?) AS n, (SELECT COUNT(*) FROM emails WHERE client_id = ?) AS e, (SELECT COUNT(*) FROM documents WHERE client_id = ?) AS d', [$c['id'], $c['id'], $c['id']]);
+                    $info[(string) $c['id']] = ['id' => (string) $c['id'], 'name' => (string) $c['name'], 'oib' => (string) $c['oib'], 'email' => (string) $c['email'], 'phone' => (string) $c['phone'],
+                        'status' => (string) $c['status'], 'owner' => user_name_of($c['owner_id']), 'notes' => (int) $cnt['n'], 'emails' => (int) $cnt['e'], 'docs' => (int) $cnt['d'], 'created' => (int) $c['created_at']];
+                }
+            }
+            out(['groups' => array_map(static fn ($g) => ['reasons' => $g['reasons'], 'clients' => array_map(static fn ($i) => $info[$i], $g['ids'])], array_slice($groups, 0, 200)), 'total' => count($groups)]);
+        }
+
+        case 'client_merge': {
+            $u = need_write();
+            need_admin($u);
+            $in = body();
+            $r = clients_merge((int) ($in['keep'] ?? 0), is_array($in['remove'] ?? null) ? $in['remove'] : [], (int) $u['id']);
+            out(['ok' => true] + $r);
+        }
+
+        case 'dup_ignore': {
+            $u = need_write();
+            need_admin($u);
+            $ids = array_values(array_unique(array_map('intval', (array) (body()['ids'] ?? []))));
+            sort($ids);
+            $k = implode(',', array_map('strval', $ids));
+            $cur = json_decode((string) setting_get('dup_ignored', '[]'), true) ?: [];
+            $cur[] = $k;
+            setting_set('dup_ignored', json_encode(array_values(array_unique($cur))));
+            out(['ok' => true]);
+        }
+
+        case 'import_preview': {
+            if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+                throw new ApiError('Metoda nije dopuštena.', 405);
+            }
+            $u = need_user();
+            need_admin($u);
+            if (!csrf_ok()) {
+                throw new ApiError('Sigurnosna provjera nije uspjela. Osvježite stranicu.', 403);
+            }
+            $f = $_FILES['file'] ?? null;
+            if (!$f || $f['error'] !== UPLOAD_ERR_OK) {
+                throw new ApiError('Datoteka nije učitana (najviše 5 MB).', 400);
+            }
+            if ($f['size'] > 5 * 1024 * 1024) {
+                throw new ApiError('Datoteka je prevelika (najviše 5 MB).', 413);
+            }
+            $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+            if (!in_array($ext, ['xlsx', 'csv', 'txt'], true)) {
+                throw new ApiError('Podržani su .xlsx i .csv. Stariji .xls spremite kao .xlsx ili CSV.', 400);
+            }
+            [$data, $heads, $fields] = import_parse((string) $f['tmp_name'], $ext === 'xlsx' ? 'xlsx' : 'csv');
+            $chk = import_check($data);
+            $token = bin2hex(random_bytes(16));
+            file_put_contents(storage_dir() . '/import-' . $token . '.json', json_encode(['name' => (string) $f['name'], 'rows' => $chk, 'at' => ms(), 'user' => (int) $u['id']], JSON_UNESCAPED_UNICODE), LOCK_EX);
+            foreach (glob(storage_dir() . '/import-*.json') ?: [] as $old) {
+                if (filemtime($old) < time() - 86400) {
+                    @unlink($old);
+                }
+            }
+            $ok = $dup = $bad = 0;
+            foreach ($chk as $r) {
+                if ($r['errors']) {
+                    $bad++;
+                } elseif ($r['dup']) {
+                    $dup++;
+                } else {
+                    $ok++;
+                }
+            }
+            $pick = static fn (array $r) => ['row' => $r['row'], 'name' => (string) ($r['rec']['name'] ?? ''), 'email' => (string) ($r['rec']['email'] ?? ''), 'errors' => $r['errors'], 'dup' => $r['dup'], 'notes' => $r['notes']];
+            out(['token' => $token, 'file' => (string) $f['name'], 'columns' => array_map(null, $fields, $heads), 'total' => count($chk), 'ok' => $ok, 'dup' => $dup, 'bad' => $bad,
+                'badRows' => array_map($pick, array_slice(array_values(array_filter($chk, static fn ($r) => $r['errors'])), 0, 100)),
+                'dupRows' => array_map($pick, array_slice(array_values(array_filter($chk, static fn ($r) => !$r['errors'] && $r['dup'])), 0, 100)),
+                'okRows' => array_map($pick, array_slice(array_values(array_filter($chk, static fn ($r) => !$r['errors'] && !$r['dup'])), 0, 30))]);
+        }
+
+        case 'import_commit': {
+            $u = need_write();
+            need_admin($u);
+            $in = body();
+            $tok = (string) ($in['token'] ?? '');
+            if (!preg_match('/^[0-9a-f]{32}$/', $tok) || !is_file(storage_dir() . '/import-' . $tok . '.json')) {
+                throw new ApiError('Pregled uvoza je istekao. Učitajte datoteku ponovno.', 404);
+            }
+            $j = json_decode((string) file_get_contents(storage_dir() . '/import-' . $tok . '.json'), true);
+            $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
+            $withDup = ($in['mode'] ?? 'skip') === 'all';
+            $statusMap = ['novi' => 'novi', 'novi kontakt' => 'novi', 'kontaktiran' => 'kontaktiran', 'ponuda' => 'ponuda', 'ponuda poslana' => 'ponuda', 'pregovori' => 'pregovori', 'aktivni' => 'aktivni', 'dobiven' => 'dobiven', 'izgubljen' => 'izgubljen'];
+            $made = $skipDup = $skipBad = 0;
+            $t = ms();
+            transaction(static function () use ($j, $owner, $withDup, $statusMap, $u, $t, &$made, &$skipDup, &$skipBad): void {
+                foreach ($j['rows'] as $r) {
+                    if ($r['errors']) {
+                        $skipBad++;
+                        continue;
+                    }
+                    if ($r['dup'] && !$withDup) {
+                        $skipDup++;
+                        continue;
+                    }
+                    $rec = $r['rec'];
+                    $kindRaw = mb_strtolower((string) ($rec['kind'] ?? ''));
+                    $kind = preg_match('/osob|fiz/u', $kindRaw) ? 'osoba' : 'tvrtka';
+                    $name = mb_substr((string) $rec['name'], 0, 190);
+                    $contact = $kind === 'osoba' ? $name : mb_substr((string) ($rec['contact'] ?? ''), 0, 190);
+                    $status = $statusMap[mb_strtolower((string) ($rec['status'] ?? ''))] ?? 'novi';
+                    $val = (string) ($rec['value'] ?? '');
+                    $val = num_hr($val);
+                    $svc = f_services((string) ($rec['service'] ?? ''));
+                    $note = 'Uvezeno iz datoteke ' . mb_substr((string) $j['name'], 0, 80) . '.' . (!empty($rec['note']) ? "\n" . mb_substr((string) $rec['note'], 0, 1500) : '');
+                    run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, NULL, NULL, 0)',
+                        [$kind, (string) ($rec['oib_fixed'] ?? ''), $name, $contact, strtolower((string) ($rec['email'] ?? '')), mb_substr((string) ($rec['phone'] ?? ''), 0, 60), $svc, $val, $status, $owner, $status === 'dobiven' ? $t : null, $u['id'], $t, $t]);
+                    $cid = insert_id();
+                    record_owner($cid, (int) $owner, $t);
+                    run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
+                    $made++;
+                }
+            });
+            @unlink(storage_dir() . '/import-' . $tok . '.json');
+            audit(null, (int) $u['id'], 'import', 'Uvoz iz datoteke ' . $j['name'] . ': uvezeno ' . $made . ', preskočeno duplikata ' . $skipDup . ', s greškom ' . $skipBad);
+            out(['ok' => true, 'created' => $made, 'skippedDup' => $skipDup, 'skippedBad' => $skipBad]);
+        }
+
         case 'settings_save': {
             $u = need_write();
             need_admin($u);
@@ -1264,6 +1539,8 @@ try {
             if ($pass !== '') {
                 check_password_strength($pass);
                 run('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($pass, PASSWORD_DEFAULT), $t['id']]);
+                trusted_revoke((int) $t['id']);
+                audit(null, (int) $u['id'], 'security', 'Administrator je resetirao lozinku korisniku ' . $t['name']);
             }
             run('UPDATE users SET name = ?, email = ?, role = ?, active = ? WHERE id = ?', [$name, $email, $role, $active, $t['id']]);
             out(['ok' => true]);
@@ -1279,6 +1556,7 @@ try {
             $new = (string) ($in['password'] ?? '');
             check_password_strength($new);
             run('UPDATE users SET pass_hash = ? WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $u['id']]);
+            trusted_revoke((int) $u['id']);
             out(['ok' => true]);
         }
 
