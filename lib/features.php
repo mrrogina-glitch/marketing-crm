@@ -546,7 +546,7 @@ function report_text(?int $now = null, bool $monthly = false): array
             . '  u radu: ' . (int) $open['c'] . ' klijenata, ' . eur_text((float) $open['v']) . "\n"
             . '  pažnja: ' . ($attention ? implode(', ', $attention) : 'sve u redu');
     }
-    $unlinked = $cnt("SELECT COUNT(*) AS c FROM emails WHERE direction = 'in' AND client_id IS NULL AND msg_date >= ? AND msg_date < ?", [$from, $to]);
+    $unlinked = $cnt("SELECT COUNT(*) AS c FROM emails WHERE deleted_at IS NULL AND direction = 'in' AND client_id IS NULL AND msg_date >= ? AND msg_date < ?", [$from, $to]);
     $company = company_name();
     $text = $title . ': ' . $label . "\n" . ($company !== '' ? $company . ' · Prodajni stol' : 'Prodajni stol') . "\n\n"
         . "UKUPNO\n"

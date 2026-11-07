@@ -439,8 +439,8 @@ function link_emails_to_client(int $clientId, string $email): void
     if ($email === '') {
         return;
     }
-    run("UPDATE emails SET client_id = ? WHERE client_id IS NULL AND direction = 'in' AND LOWER(from_email) = ?", [$clientId, strtolower($email)]);
-    run("UPDATE emails SET client_id = ? WHERE client_id IS NULL AND direction = 'out' AND LOWER(to_email) = ?", [$clientId, strtolower($email)]);
+    run("UPDATE emails SET client_id = ? WHERE client_id IS NULL AND deleted_at IS NULL AND direction = 'in' AND LOWER(from_email) = ?", [$clientId, strtolower($email)]);
+    run("UPDATE emails SET client_id = ? WHERE client_id IS NULL AND deleted_at IS NULL AND direction = 'out' AND LOWER(to_email) = ?", [$clientId, strtolower($email)]);
     sync_document_clients();
 }
 

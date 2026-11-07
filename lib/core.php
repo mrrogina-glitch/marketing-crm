@@ -254,6 +254,9 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        11 => [
+            "ALTER TABLE emails ADD deleted_at $big NULL",
+        ],
         10 => [
             "CREATE TABLE tasks (id $pk, client_id $big NULL, title VARCHAR(300) NOT NULL, due_date DATE NULL, assignee_id $big NOT NULL, created_by $big NOT NULL, created_at $big NOT NULL, done_at $big NULL)$opt",
             "CREATE INDEX ix_tasks_assignee ON tasks (assignee_id, done_at)",
