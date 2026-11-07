@@ -1,0 +1,504 @@
+<?php
+declare(strict_types=1);
+
+if (!defined('APP_ROOT')) {
+    define('APP_ROOT', dirname(__DIR__));
+}
+
+const STAGES = ['novi', 'kontaktiran', 'ponuda', 'pregovori', 'dobiven', 'izgubljen'];
+const NOTE_TYPES = ['note', 'call', 'meeting', 'email', 'status'];
+
+final class ApiError extends RuntimeException
+{
+    public int $status;
+
+    public function __construct(string $message, int $status = 400)
+    {
+        parent::__construct($message);
+        $this->status = $status;
+    }
+}
+
+/* ---------- config ---------- */
+
+function cfg(?string $path = null, $default = null)
+{
+    static $c = null;
+    if ($c === null) {
+        $f = APP_ROOT . '/config.php';
+        if (!is_file($f)) {
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            exit("Nedostaje config.php. Kopirajte config.sample.php u config.php i upišite podatke baze.\n");
+        }
+        $c = require $f;
+    }
+    if ($path === null) {
+        return $c;
+    }
+    $v = $c;
+    foreach (explode('.', $path) as $k) {
+        if (!is_array($v) || !array_key_exists($k, $v)) {
+            return $default;
+        }
+        $v = $v[$k];
+    }
+    return $v;
+}
+
+function app_boot(): void
+{
+    date_default_timezone_set((string) cfg('app.timezone', 'Europe/Zagreb'));
+    mb_internal_encoding('UTF-8');
+    mt_srand();
+}
+
+function is_https(): bool
+{
+    return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+}
+
+function send_security_headers(bool $csp = true): void
+{
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Referrer-Policy: same-origin');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    if ($csp) {
+        header("Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    }
+    if (is_https()) {
+        header('Strict-Transport-Security: max-age=31536000');
+    }
+}
+
+/* ---------- database ---------- */
+
+function db(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+    $d = cfg('db');
+    $dsn = $d['dsn'] ?? ('mysql:host=' . $d['host'] . ';dbname=' . $d['name'] . ';charset=' . ($d['charset'] ?? 'utf8mb4'));
+    $pdo = new PDO($dsn, $d['user'] ?? null, $d['pass'] ?? null, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+    migrate($pdo);
+    return $pdo;
+}
+
+/**
+ * Versioned schema. Add a new numbered step at the end to change the database;
+ * it is applied automatically the first time the updated code runs on the server.
+ */
+function migrate(PDO $pdo): void
+{
+    $sqlite = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+    $pk = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY';
+    $opt = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    $big = $sqlite ? 'INTEGER' : 'BIGINT UNSIGNED';
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS meta (k VARCHAR(64) NOT NULL PRIMARY KEY, v VARCHAR(255) NOT NULL)$opt");
+    $row = $pdo->query("SELECT v FROM meta WHERE k = 'schema'")->fetch();
+    $ver = $row ? (int) $row['v'] : 0;
+
+    $steps = [
+        1 => [
+            "CREATE TABLE users (
+                id $pk,
+                name VARCHAR(120) NOT NULL,
+                email VARCHAR(190) NOT NULL,
+                pass_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(16) NOT NULL DEFAULT 'sales',
+                active TINYINT NOT NULL DEFAULT 1,
+                created_at $big NOT NULL,
+                last_login $big NULL
+            )$opt",
+            "CREATE UNIQUE INDEX ux_users_email ON users (email)",
+            "CREATE TABLE clients (
+                id $pk,
+                name VARCHAR(190) NOT NULL,
+                contact VARCHAR(190) NOT NULL DEFAULT '',
+                email VARCHAR(190) NOT NULL DEFAULT '',
+                phone VARCHAR(60) NOT NULL DEFAULT '',
+                service VARCHAR(120) NOT NULL DEFAULT '',
+                value DECIMAL(12,2) NOT NULL DEFAULT 0,
+                status VARCHAR(20) NOT NULL DEFAULT 'novi',
+                owner_id $big NULL,
+                next_follow_up DATE NULL,
+                won_at $big NULL,
+                created_by $big NULL,
+                created_at $big NOT NULL,
+                updated_at $big NOT NULL
+            )$opt",
+            "CREATE INDEX ix_clients_owner ON clients (owner_id)",
+            "CREATE INDEX ix_clients_status ON clients (status)",
+            "CREATE TABLE notes (
+                id $pk,
+                client_id $big NOT NULL,
+                author_id $big NOT NULL,
+                type VARCHAR(12) NOT NULL DEFAULT 'note',
+                subject VARCHAR(255) NULL,
+                body TEXT NOT NULL,
+                to_email VARCHAR(190) NULL,
+                created_at $big NOT NULL
+            )$opt",
+            "CREATE INDEX ix_notes_client ON notes (client_id, created_at)",
+            "CREATE INDEX ix_notes_author ON notes (author_id, created_at)",
+            "CREATE TABLE login_attempts (
+                id $pk,
+                ip VARCHAR(45) NOT NULL,
+                created_at $big NOT NULL
+            )$opt",
+            "CREATE INDEX ix_login_ip ON login_attempts (ip, created_at)",
+        ],
+        2 => [
+            "CREATE TABLE emails (
+                id $pk,
+                direction VARCHAR(3) NOT NULL,
+                uid $big NULL,
+                message_id VARCHAR(190) NOT NULL,
+                in_reply_to VARCHAR(190) NULL,
+                from_email VARCHAR(190) NOT NULL DEFAULT '',
+                from_name VARCHAR(190) NOT NULL DEFAULT '',
+                reply_to VARCHAR(190) NOT NULL DEFAULT '',
+                to_email VARCHAR(190) NOT NULL DEFAULT '',
+                subject VARCHAR(255) NOT NULL DEFAULT '',
+                body " . ($sqlite ? 'TEXT' : 'MEDIUMTEXT') . " NOT NULL,
+                preview VARCHAR(255) NOT NULL DEFAULT '',
+                attachments VARCHAR(500) NULL,
+                msg_date $big NOT NULL,
+                client_id $big NULL,
+                user_id $big NULL,
+                read_at $big NULL,
+                created_at $big NOT NULL
+            )$opt",
+            "CREATE UNIQUE INDEX ux_emails_mid ON emails (message_id)",
+            "CREATE INDEX ix_emails_date ON emails (msg_date)",
+            "CREATE INDEX ix_emails_client ON emails (client_id)",
+            "CREATE INDEX ix_emails_from ON emails (from_email)",
+        ],
+        3 => [
+            "ALTER TABLE clients ADD kind VARCHAR(8) NOT NULL DEFAULT 'tvrtka'",
+            "ALTER TABLE clients ADD oib VARCHAR(20) NOT NULL DEFAULT ''",
+            "ALTER TABLE users ADD signature TEXT NULL",
+            "ALTER TABLE emails ADD auto TINYINT NOT NULL DEFAULT 0",
+            "ALTER TABLE emails ADD remind_days INT NULL",
+            "ALTER TABLE emails ADD remind_done_at $big NULL",
+            "ALTER TABLE emails ADD remind_notified_at $big NULL",
+            "CREATE TABLE settings (k VARCHAR(64) NOT NULL PRIMARY KEY, v TEXT NOT NULL)$opt",
+            "CREATE TABLE templates (
+                id $pk,
+                name VARCHAR(120) NOT NULL,
+                subject VARCHAR(255) NOT NULL,
+                body TEXT NOT NULL,
+                sort_order INT NOT NULL DEFAULT 0,
+                updated_at $big NOT NULL
+            )$opt",
+            "CREATE TABLE scheduled_emails (
+                id $pk,
+                user_id $big NOT NULL,
+                client_id $big NOT NULL,
+                to_email VARCHAR(190) NOT NULL,
+                subject VARCHAR(255) NOT NULL,
+                body TEXT NOT NULL,
+                doc_ids VARCHAR(255) NOT NULL DEFAULT '',
+                remind_days INT NULL,
+                send_at $big NOT NULL,
+                status VARCHAR(10) NOT NULL DEFAULT 'pending',
+                attempts INT NOT NULL DEFAULT 0,
+                error VARCHAR(255) NULL,
+                created_at $big NOT NULL,
+                sent_at $big NULL
+            )$opt",
+            "CREATE INDEX ix_sched_due ON scheduled_emails (status, send_at)",
+            "CREATE TABLE documents (
+                id $pk,
+                client_id $big NULL,
+                email_id $big NULL,
+                filename VARCHAR(190) NOT NULL,
+                mime VARCHAR(120) NOT NULL DEFAULT 'application/octet-stream',
+                size INT NOT NULL DEFAULT 0,
+                stored VARCHAR(64) NOT NULL,
+                uploaded_by $big NULL,
+                created_at $big NOT NULL
+            )$opt",
+            "CREATE INDEX ix_docs_client ON documents (client_id)",
+            "CREATE INDEX ix_docs_email ON documents (email_id)",
+            static function (PDO $pdo): void {
+                $ins = $pdo->prepare('INSERT INTO templates (name, subject, body, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)');
+                foreach (default_templates() as $i => $t) {
+                    $ins->execute([$t[0], $t[1], $t[2], $i + 1, (int) (microtime(true) * 1000)]);
+                }
+            },
+        ],
+    ];
+
+    foreach ($steps as $n => $sqls) {
+        if ($n <= $ver) {
+            continue;
+        }
+        foreach ($sqls as $s) {
+            try {
+                if ($s instanceof Closure) {
+                    $s($pdo);
+                } else {
+                    $pdo->exec($s);
+                }
+            } catch (PDOException $e) {
+                // makes an interrupted update safe to run again
+                if (!preg_match('/duplicate column|already exists|duplicate key name/i', $e->getMessage())) {
+                    throw $e;
+                }
+            }
+        }
+        $pdo->exec("DELETE FROM meta WHERE k = 'schema'");
+        $pdo->exec("INSERT INTO meta (k, v) VALUES ('schema', '" . (int) $n . "')");
+    }
+}
+
+/** Ready-made e-mail templates seeded on first install. Placeholders: {{ime}} {{tvrtka}} {{usluga}} {{moje_ime}}. The signature is appended automatically. */
+function default_templates(): array
+{
+    return [
+        ['Prvi kontakt', 'Više upita za {{tvrtka}} kroz marketing',
+            "Poštovani/a {{ime}},\n\nzovem se {{moje_ime}} i javljam Vam se iz marketinške agencije. Tvrtkama poput {{tvrtka}} pomažemo da dobiju više upita, a početak je obično usluga: {{usluga}}.\n\nMogu li Vam predložiti kratki razgovor od 15 minuta ovaj tjedan?\n\nLijep pozdrav,"],
+        ['Ponuda', 'Ponuda: {{usluga}} za {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\nhvala Vam na razgovoru. Prema dogovoru šaljem Vam ponudu za uslugu: {{usluga}}.\n\nPonuda sadrži opseg usluge, rokove i cijenu. Ako je potrebno, rado ću prilagoditi opseg Vašem proračunu. Ponuda vrijedi 30 dana od datuma slanja.\n\nKada Vam odgovara kratki poziv da prođemo kroz sve stavke?\n\nLijep pozdrav,"],
+        ['Follow-up nakon ponude', 'Jeste li stigli pogledati ponudu?',
+            "Poštovani/a {{ime}},\n\njavljam se kratko u vezi s ponudom koju sam Vam poslao/la. Ako imate pitanja ili želite promijeniti opseg, slobodno mi se javite, rado ću je prilagoditi.\n\nLijep pozdrav,"],
+        ['Follow-up bez odgovora', 'Kratka provjera: {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\nnisam siguran/na je li Vam moja prethodna poruka stigla, pa Vam se javljam još jednom. Ako trenutno nije pravi trenutak, slobodno mi recite pa ću se javiti kasnije.\n\nLijep pozdrav,"],
+        ['Zahvala nakon sastanka', 'Hvala na razgovoru, {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\nhvala Vam na izdvojenom vremenu. Ukratko, dogovorili smo sljedeće:\n\n- \n- \n\nSljedeći korak je moj: poslat ću Vam prijedlog do dogovorenog roka.\n\nLijep pozdrav,"],
+        ['Zahvala na suradnji', 'Hvala na povjerenju, {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\nzahvaljujemo Vam na povjerenju. Veselimo se suradnji na usluzi: {{usluga}}.\n\nU idućim danima javit ćemo Vam se s popisom potrebnih materijala i terminom početnog sastanka.\n\nLijep pozdrav,"],
+    ];
+}
+
+/** Runs $fn inside a database transaction. */
+function transaction(callable $fn)
+{
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $r = $fn();
+        $pdo->commit();
+        return $r;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+function row(string $sql, array $p = []): ?array
+{
+    $s = db()->prepare($sql);
+    $s->execute($p);
+    $r = $s->fetch();
+    return $r === false ? null : $r;
+}
+
+function rows(string $sql, array $p = []): array
+{
+    $s = db()->prepare($sql);
+    $s->execute($p);
+    return $s->fetchAll();
+}
+
+function run(string $sql, array $p = []): int
+{
+    $s = db()->prepare($sql);
+    $s->execute($p);
+    return $s->rowCount();
+}
+
+function insert_id(): int
+{
+    return (int) db()->lastInsertId();
+}
+
+function ms(): int
+{
+    return (int) floor(microtime(true) * 1000);
+}
+
+function meta_get(string $k): ?string
+{
+    $r = row('SELECT v FROM meta WHERE k = ?', [$k]);
+    return $r ? (string) $r['v'] : null;
+}
+
+function meta_set(string $k, string $v): void
+{
+    run('DELETE FROM meta WHERE k = ?', [$k]);
+    run('INSERT INTO meta (k, v) VALUES (?, ?)', [$k, mb_substr($v, 0, 250)]);
+}
+
+/* ---------- session and auth ---------- */
+
+function start_session(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        return;
+    }
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.gc_maxlifetime', '43200');
+    session_name('crmsid');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => is_https(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    session_start();
+}
+
+function current_user(): ?array
+{
+    static $cache = false;
+    if ($cache !== false) {
+        return $cache;
+    }
+    start_session();
+    $id = $_SESSION['uid'] ?? null;
+    $u = null;
+    if ($id) {
+        $u = row('SELECT id, name, email, role, active, signature FROM users WHERE id = ?', [(int) $id]);
+        if (!$u || (int) $u['active'] !== 1) {
+            $u = null;
+            unset($_SESSION['uid']);
+        }
+    }
+    return $cache = $u;
+}
+
+function csrf_token(): string
+{
+    start_session();
+    if (empty($_SESSION['csrf'])) {
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf'];
+}
+
+function csrf_ok(): bool
+{
+    start_session();
+    $t = $_SESSION['csrf'] ?? '';
+    return $t !== '' && hash_equals($t, (string) ($_SERVER['HTTP_X_CSRF'] ?? ''));
+}
+
+function client_ip(): string
+{
+    return substr((string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'), 0, 45);
+}
+
+/* ---------- validation ---------- */
+
+function f_str(array $in, string $k, int $max, string $label, bool $required = false): string
+{
+    $v = $in[$k] ?? '';
+    $v = (is_string($v) || is_numeric($v)) ? trim((string) $v) : '';
+    if ($required && $v === '') {
+        throw new ApiError("$label je obavezno.");
+    }
+    if (mb_strlen($v) > $max) {
+        throw new ApiError("$label je predugo (najviše $max znakova).");
+    }
+    return $v;
+}
+
+function f_email(array $in, string $k, bool $required = false): string
+{
+    $v = f_str($in, $k, 190, 'E-mail', $required);
+    if ($v !== '' && !filter_var($v, FILTER_VALIDATE_EMAIL)) {
+        throw new ApiError('E-mail adresa nije ispravna.');
+    }
+    return $v;
+}
+
+function f_date($v): ?string
+{
+    $v = is_string($v) ? trim($v) : '';
+    if ($v === '') {
+        return null;
+    }
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $v, $m) || !checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+        throw new ApiError('Datum nije ispravan.');
+    }
+    return $v;
+}
+
+function f_value($v): string
+{
+    if ($v === '' || $v === null) {
+        return '0';
+    }
+    if (!is_numeric($v) || (float) $v < 0 || (float) $v > 999999999) {
+        throw new ApiError('Vrijednost nije ispravna.');
+    }
+    return number_format((float) $v, 2, '.', '');
+}
+
+function f_status($v): string
+{
+    if (!is_string($v) || !in_array($v, STAGES, true)) {
+        throw new ApiError('Status nije ispravan.');
+    }
+    return $v;
+}
+
+function f_text(array $in, string $k, string $label): string
+{
+    $v = f_str($in, $k, 5000, $label, true);
+    if (mb_strlen($v) < 3) {
+        throw new ApiError("$label je obavezna. Upišite barem nekoliko riječi.");
+    }
+    return $v;
+}
+
+function f_kind(array $in, string $default = 'tvrtka'): string
+{
+    $v = $in['kind'] ?? $default;
+    if (!is_string($v) || !in_array($v, ['tvrtka', 'osoba'], true)) {
+        throw new ApiError('Odaberite vrstu klijenta: tvrtka ili fizička osoba.');
+    }
+    return $v;
+}
+
+/** OIB: 11 digits with the ISO 7064 (MOD 11,10) check digit; empty is allowed. */
+function f_oib(array $in): string
+{
+    $v = f_str($in, 'oib', 20, 'OIB');
+    if ($v === '') {
+        return '';
+    }
+    if (!preg_match('/^\d{11}$/', $v)) {
+        throw new ApiError('OIB mora imati točno 11 znamenki.');
+    }
+    $a = 10;
+    for ($i = 0; $i < 10; $i++) {
+        $a = ($a + (int) $v[$i]) % 10;
+        if ($a === 0) {
+            $a = 10;
+        }
+        $a = ($a * 2) % 11;
+    }
+    $c = 11 - $a;
+    if ($c === 10) {
+        $c = 0;
+    }
+    if ($c !== (int) $v[10]) {
+        throw new ApiError('OIB nije ispravan.');
+    }
+    return $v;
+}

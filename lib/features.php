@@ -1,0 +1,610 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Features built on top of the mailbox: signatures, documents (attachments), scheduled sending,
+ * "no reply" reminders, out-of-hours auto reply and the weekly report.
+ */
+
+const DAY_MS = 86400000;
+
+/* ---------- settings (small key/value store in the database) ---------- */
+
+function setting_get(string $k, ?string $default = null): ?string
+{
+    $r = row('SELECT v FROM settings WHERE k = ?', [$k]);
+    return $r ? (string) $r['v'] : $default;
+}
+
+function setting_set(string $k, string $v): void
+{
+    run('DELETE FROM settings WHERE k = ?', [$k]);
+    run('INSERT INTO settings (k, v) VALUES (?, ?)', [$k, $v]);
+}
+
+/* ---------- working hours ---------- */
+
+/** @return array{days:int[],start:int,end:int,label:string} start and end are minutes since midnight */
+function work_cfg(): array
+{
+    $days = cfg('work.days', [1, 2, 3, 4, 5]);
+    $days = is_array($days) ? array_map('intval', $days) : [1, 2, 3, 4, 5];
+    $toMin = static function ($v, int $def): int {
+        return preg_match('/^(\d{1,2}):(\d{2})$/', (string) $v, $m) ? ((int) $m[1]) * 60 + (int) $m[2] : $def;
+    };
+    $start = $toMin(cfg('work.start', '08:00'), 480);
+    $end = $toMin(cfg('work.end', '16:00'), 960);
+    $names = [1 => 'ponedjeljak', 2 => 'utorak', 3 => 'srijeda', 4 => 'četvrtak', 5 => 'petak', 6 => 'subota', 7 => 'nedjelja'];
+    $first = $days ? ($names[min($days)] ?? '') : '';
+    $last = $days ? ($names[max($days)] ?? '') : '';
+    $fmt = static fn (int $m): string => sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+    return ['days' => $days, 'start' => $start, 'end' => $end,
+        'label' => $first . '–' . $last . ', ' . $fmt($start) . '–' . $fmt($end)];
+}
+
+function is_work_time(int $tsMs): bool
+{
+    $w = work_cfg();
+    $ts = intdiv($tsMs, 1000);
+    $mins = (int) date('G', $ts) * 60 + (int) date('i', $ts);
+    return in_array((int) date('N', $ts), $w['days'], true) && $mins >= $w['start'] && $mins < $w['end'];
+}
+
+/* ---------- signature ---------- */
+
+function company_name(): string
+{
+    return trim((string) cfg('mail.from_name', ''));
+}
+
+function default_signature(array $u): string
+{
+    $lines = [trim((string) $u['name'])];
+    if (company_name() !== '') {
+        $lines[] = company_name();
+    }
+    if (Mailer::fromEmail() !== '') {
+        $lines[] = Mailer::fromEmail();
+    }
+    return implode("\n", $lines);
+}
+
+function effective_signature(array $u): string
+{
+    $s = trim((string) ($u['signature'] ?? ''));
+    return $s !== '' ? $s : default_signature($u);
+}
+
+function with_signature(string $text, array $u): string
+{
+    return rtrim($text) . "\n\n" . effective_signature($u);
+}
+
+/* ---------- documents ---------- */
+
+const DOC_MAX_BYTES = 10 * 1024 * 1024;
+const MAIL_ATTACH_MAX_BYTES = 15 * 1024 * 1024;
+
+function storage_dir(): string
+{
+    $dir = rtrim((string) cfg('app.storage', APP_ROOT . '/storage'), '/\\');
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0750, true);
+    }
+    if (!is_file($dir . '/.htaccess')) {
+        @file_put_contents($dir . '/.htaccess', "Require all denied\n");
+    }
+    if (!is_dir($dir) || !is_writable($dir)) {
+        throw new ApiError('Mapa za dokumente nije dostupna za pisanje. Obavijestite administratora.', 500);
+    }
+    return $dir;
+}
+
+function safe_filename(string $name): string
+{
+    $name = str_replace('\\', '/', $name);
+    $name = basename($name);
+    $name = preg_replace('/[\x00-\x1F\x7F<>:"|?*]/u', '', $name) ?? '';
+    $name = trim($name, " .\t");
+    $name = mb_substr($name, 0, 150);
+    return $name !== '' ? $name : 'datoteka';
+}
+
+function store_document(?int $clientId, ?int $emailId, string $name, string $mime, string $data, ?int $userId): int
+{
+    $stored = bin2hex(random_bytes(16));
+    if (@file_put_contents(storage_dir() . '/' . $stored, $data, LOCK_EX) === false) {
+        throw new ApiError('Spremanje datoteke nije uspjelo.', 500);
+    }
+    $mime = preg_match('#^[\w.+-]+/[\w.+-]+$#', $mime) ? mb_substr($mime, 0, 120) : 'application/octet-stream';
+    run('INSERT INTO documents (client_id, email_id, filename, mime, size, stored, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [$clientId, $emailId, safe_filename($name), $mime, strlen($data), $stored, $userId, ms()]);
+    return insert_id();
+}
+
+function doc_out(array $r): array
+{
+    return [
+        'id' => (string) $r['id'],
+        'clientId' => $r['client_id'] !== null ? (string) $r['client_id'] : null,
+        'emailId' => $r['email_id'] !== null ? (string) $r['email_id'] : null,
+        'name' => (string) $r['filename'],
+        'size' => (int) $r['size'],
+        'by' => $r['uploaded_by'] !== null ? (string) $r['uploaded_by'] : null,
+        'createdAt' => (int) $r['created_at'],
+    ];
+}
+
+function delete_document_rows(array $docs): void
+{
+    foreach ($docs as $d) {
+        if (preg_match('/^[0-9a-f]{32}$/', (string) $d['stored'])) {
+            @unlink(storage_dir() . '/' . $d['stored']);
+        }
+        run('DELETE FROM documents WHERE id = ?', [$d['id']]);
+    }
+}
+
+/** Documents of incoming mail follow the mail when it is linked to a client or unlinked. */
+function sync_document_clients(): void
+{
+    run('UPDATE documents SET client_id = (SELECT e.client_id FROM emails e WHERE e.id = documents.email_id) WHERE email_id IS NOT NULL');
+}
+
+/** @return list<array{0:string,1:string,2:string}> */
+function load_attachments(array $docIds, ?int $clientId): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $docIds))));
+    if (count($ids) > 10) {
+        throw new ApiError('Najviše 10 privitaka po poruci.');
+    }
+    $out = [];
+    $total = 0;
+    foreach ($ids as $id) {
+        $d = row('SELECT * FROM documents WHERE id = ?', [$id]);
+        if (!$d || ($clientId !== null && (int) $d['client_id'] !== $clientId)) {
+            throw new ApiError('Odabrani privitak nije pronađen.');
+        }
+        $total += (int) $d['size'];
+        if ($total > MAIL_ATTACH_MAX_BYTES) {
+            throw new ApiError('Privici zajedno smiju imati najviše 15 MB.');
+        }
+        $data = preg_match('/^[0-9a-f]{32}$/', (string) $d['stored']) ? @file_get_contents(storage_dir() . '/' . $d['stored']) : false;
+        if ($data === false) {
+            throw new ApiError('Datoteka "' . $d['filename'] . '" nedostaje na poslužitelju.', 500);
+        }
+        $out[] = [(string) $d['filename'], (string) $d['mime'], $data];
+    }
+    return $out;
+}
+
+/* ---------- sending ---------- */
+
+/**
+ * Sends one message from the shared mailbox and records it (emails table and the Sent folder copy).
+ * $u is the salesperson; null means a system message (auto reply).
+ * The signature is NOT added here; callers add it with with_signature().
+ * @return int id of the stored e-mail
+ */
+function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false): int
+{
+    if (!Mailer::configured()) {
+        throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
+    }
+    if ($u !== null) {
+        $hour = row("SELECT COUNT(*) AS c FROM emails WHERE user_id = ? AND direction = 'out' AND auto = 0 AND created_at > ?", [$u['id'], ms() - 3600 * 1000]);
+        if ((int) $hour['c'] >= 60) {
+            throw new ApiError('Dosegnuto je ograničenje od 60 e-mailova na sat.', 429);
+        }
+    }
+    $attachments = $docIds ? load_attachments($docIds, $clientId) : [];
+    $extra = $inReplyTo ? ['In-Reply-To' => $inReplyTo, 'References' => $inReplyTo] : [];
+    if ($auto) {
+        $extra['Auto-Submitted'] = 'auto-replied';
+        $extra['X-Auto-Response-Suppress'] = 'All';
+        $extra['Precedence'] = 'bulk';
+    }
+    try {
+        $sent = Mailer::send($to, $subject, $text, $u ? (string) $u['name'] : null, $extra, $attachments);
+    } catch (MailException $e) {
+        error_log('CRM mail: ' . $e->getMessage());
+        throw new ApiError('Slanje nije uspjelo. Provjerite adresu primatelja ili obavijestite administratora.', 502);
+    }
+    if ($clientId === null) {
+        $clientId = client_for_email(strtolower($to));
+    }
+    $names = $attachments ? mb_substr(implode(' | ', array_map(static fn ($a) => $a[0], $attachments)), 0, 500) : null;
+    $id = store_outgoing($sent['message_id'], $to, $subject, $text, $clientId, $u ? (int) $u['id'] : null,
+        $inReplyTo ? trim($inReplyTo, '<> ') : null, Mailer::fromEmail(), $u ? (string) $u['name'] : company_name(), $names, $auto, $remindDays);
+    sent_copy($sent['raw']);
+    return $id;
+}
+
+/** Logs a sent client e-mail as a note (every contact must leave a trace) and fills in a missing client address. */
+function record_client_email(array $c, array $u, string $to, string $subject, string $text): void
+{
+    $t = ms();
+    transaction(static function () use ($c, $u, $to, $subject, $text, $t): void {
+        run('INSERT INTO notes (client_id, author_id, type, subject, body, to_email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [$c['id'], $u['id'], 'email', $subject, $text, $to, $t]);
+        if ($c['email'] === '') {
+            run('UPDATE clients SET email = ?, updated_at = ? WHERE id = ?', [$to, $t, $c['id']]);
+        } else {
+            run('UPDATE clients SET updated_at = ? WHERE id = ?', [$t, $c['id']]);
+        }
+    });
+}
+
+/* ---------- scheduled sending ---------- */
+
+function scheduled_out(array $r): array
+{
+    return [
+        'id' => (string) $r['id'],
+        'userId' => (string) $r['user_id'],
+        'clientId' => (string) $r['client_id'],
+        'to' => (string) $r['to_email'],
+        'subject' => (string) $r['subject'],
+        'sendAt' => (int) $r['send_at'],
+        'status' => (string) $r['status'],
+        'error' => (string) ($r['error'] ?? ''),
+    ];
+}
+
+/** Sends everything that is due. Safe to call often; each message is claimed before sending. */
+function process_scheduled(): int
+{
+    run("UPDATE scheduled_emails SET status = 'failed', error = ? WHERE status = 'sending' AND send_at < ?",
+        ['Slanje je prekinuto. Provjerite mapu Poslano i po potrebi zakažite ponovno.', ms() - 1800000]);
+    $due = rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND send_at <= ? ORDER BY send_at LIMIT 20", [ms()]);
+    $sent = 0;
+    foreach ($due as $s) {
+        if (run("UPDATE scheduled_emails SET status = 'sending' WHERE id = ? AND status = 'pending'", [$s['id']]) !== 1) {
+            continue;
+        }
+        $fail = static function (string $why) use ($s): void {
+            run("UPDATE scheduled_emails SET status = 'failed', error = ? WHERE id = ?", [mb_substr($why, 0, 250), $s['id']]);
+        };
+        $retry = static function (int $delayMs, bool $count, string $why) use ($s, $fail): void {
+            $attempts = (int) $s['attempts'] + ($count ? 1 : 0);
+            if ($attempts >= 3) {
+                run("UPDATE scheduled_emails SET status = 'failed', attempts = ?, error = ? WHERE id = ?", [$attempts, mb_substr($why, 0, 250), $s['id']]);
+                return;
+            }
+            run("UPDATE scheduled_emails SET status = 'pending', attempts = ?, send_at = ?, error = ? WHERE id = ?",
+                [$attempts, ms() + $delayMs, mb_substr($why, 0, 250), $s['id']]);
+        };
+        $u = row('SELECT * FROM users WHERE id = ?', [$s['user_id']]);
+        $c = row('SELECT * FROM clients WHERE id = ?', [$s['client_id']]);
+        if (!$u || (int) $u['active'] !== 1 || !$c) {
+            $fail('Korisnik ili klijent više ne postoji.');
+            continue;
+        }
+        try {
+            $docIds = array_filter(array_map('intval', explode(',', (string) $s['doc_ids'])));
+            send_and_store($u, (string) $s['to_email'], (string) $s['subject'], with_signature((string) $s['body'], $u), (int) $c['id'], null, $docIds,
+                $s['remind_days'] !== null ? (int) $s['remind_days'] : null);
+            // mark as sent first: a failure while writing the note must never cause a second send
+            run("UPDATE scheduled_emails SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?", [ms(), $s['id']]);
+            $sent++;
+            try {
+                record_client_email($c, $u, (string) $s['to_email'], (string) $s['subject'], (string) $s['body']);
+            } catch (Throwable $e) {
+                error_log('CRM scheduled note: ' . $e->getMessage());
+            }
+        } catch (ApiError $e) {
+            if ($e->status === 429) {
+                $retry(600000, false, $e->getMessage());
+            } elseif ($e->status === 502) {
+                $retry(300000, true, $e->getMessage());
+            } else {
+                $fail($e->getMessage());
+            }
+        } catch (Throwable $e) {
+            error_log('CRM scheduled: ' . $e->getMessage());
+            $retry(300000, true, 'Neočekivana greška pri slanju.');
+        }
+    }
+    return $sent;
+}
+
+/* ---------- "no reply" reminders ---------- */
+
+/**
+ * Sent client mails that asked for a reminder, are old enough and got no reply.
+ * @return list<array<string,mixed>>
+ */
+function reminders_due(?array $viewer = null): array
+{
+    $now = ms();
+    $all = rows(
+        "SELECT e.id, e.client_id, e.subject, e.msg_date, e.user_id, e.remind_days, e.remind_notified_at, c.name AS client_name, c.owner_id
+           FROM emails e JOIN clients c ON c.id = e.client_id
+          WHERE e.direction = 'out' AND e.auto = 0 AND e.remind_days IS NOT NULL AND e.remind_done_at IS NULL
+            AND c.status NOT IN ('dobiven', 'izgubljen')
+            AND e.msg_date + e.remind_days * " . DAY_MS . " <= " . (int) $now . "
+            AND NOT EXISTS (SELECT 1 FROM emails r WHERE r.direction = 'in' AND r.client_id = e.client_id AND r.msg_date > e.msg_date)
+            AND NOT EXISTS (SELECT 1 FROM emails o WHERE o.direction = 'out' AND o.auto = 0 AND o.client_id = e.client_id
+                            AND (o.msg_date > e.msg_date OR (o.msg_date = e.msg_date AND o.id > e.id)))
+          ORDER BY e.msg_date");
+    if ($viewer !== null && $viewer['role'] !== 'admin') {
+        $me = (int) $viewer['id'];
+        $all = array_values(array_filter($all, static fn ($r) => (int) $r['owner_id'] === $me || (int) $r['user_id'] === $me));
+    }
+    return $all;
+}
+
+function reminder_out(array $r): array
+{
+    return [
+        'id' => (string) $r['id'],
+        'clientId' => (string) $r['client_id'],
+        'subject' => (string) $r['subject'],
+        'sentAt' => (int) $r['msg_date'],
+        'userId' => $r['user_id'] !== null ? (string) $r['user_id'] : null,
+        'days' => (int) floor((ms() - (int) $r['msg_date']) / DAY_MS),
+    ];
+}
+
+/** One e-mail per salesperson with the clients that have not answered yet (sent once per reminder). */
+function notify_reminders(): int
+{
+    $by = [];
+    foreach (reminders_due() as $r) {
+        if ($r['remind_notified_at'] !== null) {
+            continue;
+        }
+        $uid = $r['owner_id'] !== null ? (int) $r['owner_id'] : (int) $r['user_id'];
+        $by[$uid][] = $r;
+    }
+    $count = 0;
+    $url = trim((string) cfg('app.url', ''));
+    foreach ($by as $uid => $list) {
+        $u = row('SELECT * FROM users WHERE id = ? AND active = 1', [$uid]);
+        if (!$u || !Mailer::configured()) {
+            continue;
+        }
+        $lines = [];
+        foreach ($list as $r) {
+            $days = (int) floor((ms() - (int) $r['msg_date']) / DAY_MS);
+            $lines[] = '- ' . $r['client_name'] . ': "' . $r['subject'] . '", poslano ' . date('d.m.Y.', (int) ($r['msg_date'] / 1000)) . ' (prije ' . $days . ' d)';
+        }
+        $text = "Pozdrav " . explode(' ', trim((string) $u['name']))[0] . ",\n\nsljedeći klijenti nisu odgovorili na Vaš e-mail:\n\n" . implode("\n", $lines)
+            . "\n\nU Prodajnom stolu (Pregled > Čekaju odgovor) možete im poslati podsjetnik, odgoditi ili odbaciti podsjetnik."
+            . ($url !== '' ? "\n" . $url : '');
+        try {
+            Mailer::send((string) $u['email'], 'Podsjetnik: ' . count($list) . ' ' . (count($list) === 1 ? 'klijent nije odgovorio' : 'klijenata nije odgovorilo'), $text, null,
+                ['Auto-Submitted' => 'auto-generated']);
+        } catch (MailException $e) {
+            error_log('CRM reminder mail: ' . $e->getMessage());
+            continue;
+        }
+        foreach ($list as $r) {
+            run('UPDATE emails SET remind_notified_at = ? WHERE id = ?', [ms(), $r['id']]);
+        }
+        $count++;
+    }
+    return $count;
+}
+
+/* ---------- out-of-hours auto reply ---------- */
+
+function autoreply_defaults(): array
+{
+    $w = work_cfg();
+    return [
+        'enabled' => '1',
+        'subject' => 'Automatski odgovor: {{predmet}}',
+        'body' => "Poštovani,\n\nhvala Vam na poruci. Trenutno smo izvan radnog vremena (" . $w['label'] . "), a Vašu poruku smo zaprimili.\n\nOdgovorit ćemo Vam prvi sljedeći radni dan.\n\nLijep pozdrav,\n" . (company_name() !== '' ? company_name() : ''),
+    ];
+}
+
+function autoreply_settings(): array
+{
+    $d = autoreply_defaults();
+    return [
+        'enabled' => setting_get('autoreply_enabled', $d['enabled']) === '1',
+        'subject' => setting_get('autoreply_subject', $d['subject']),
+        'body' => setting_get('autoreply_body', $d['body']),
+    ];
+}
+
+/**
+ * Replies once per sender per day to fresh mail that arrived outside working hours.
+ * Never answers automatic mail, mailing lists, bounces, no-reply addresses or our own mailbox.
+ * @param array<string,string> $h parsed lower-case headers of the incoming message
+ */
+function maybe_auto_reply(array $h, string $fromEmail, string $subject, string $messageId, int $dateMs, ?int $clientId): bool
+{
+    $cfgA = autoreply_settings();
+    if (!$cfgA['enabled'] || !Mailer::configured() || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+        return false;
+    }
+    if ($dateMs < ms() - 12 * 3600 * 1000 || is_work_time($dateMs)) {
+        return false;
+    }
+    if (strtolower($fromEmail) === strtolower(Mailer::fromEmail())) {
+        return false;
+    }
+    if (preg_match('/(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce|notification|newsletter)/i', $fromEmail)) {
+        return false;
+    }
+    $as = strtolower(trim($h['auto-submitted'] ?? ''));
+    if ($as !== '' && $as !== 'no') {
+        return false;
+    }
+    if (preg_match('/^(bulk|list|junk|auto_reply)$/i', trim($h['precedence'] ?? ''))) {
+        return false;
+    }
+    foreach (['list-id', 'list-unsubscribe', 'x-auto-response-suppress', 'x-autoreply', 'x-autorespond', 'x-failed-recipients'] as $k) {
+        if (isset($h[$k])) {
+            return false;
+        }
+    }
+    if (isset($h['return-path']) && preg_match('/^<\s*>$/', trim($h['return-path']))) {
+        return false;
+    }
+    $dup = row("SELECT id FROM emails WHERE direction = 'out' AND auto = 1 AND LOWER(to_email) = ? AND created_at > ?", [strtolower($fromEmail), ms() - DAY_MS]);
+    if ($dup) {
+        return false;
+    }
+    $subj = str_replace('{{predmet}}', $subject !== '' ? $subject : '(bez predmeta)', $cfgA['subject']);
+    $subj = trim(preg_replace('/[\r\n]+/', ' ', $subj) ?? '');
+    try {
+        send_and_store(null, $fromEmail, mb_substr($subj, 0, 255), (string) $cfgA['body'], $clientId, '<' . $messageId . '>', [], null, true);
+        return true;
+    } catch (Throwable $e) {
+        error_log('CRM auto reply: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/* ---------- weekly report ---------- */
+
+/** @return array{0:int,1:int,2:string} start (inclusive) and end (exclusive) in ms of the previous full Mon-Sun week, plus a label */
+function report_period(?int $now = null): array
+{
+    $tz = new DateTimeZone(date_default_timezone_get());
+    $d = (new DateTimeImmutable('@' . ($now ?? time())))->setTimezone($tz);
+    $monThis = $d->modify('monday this week')->setTime(0, 0);
+    $from = $monThis->modify('-7 days');
+    $label = $from->format('d.m.') . ' – ' . $monThis->modify('-1 day')->format('d.m.Y.');
+    return [$from->getTimestamp() * 1000, $monThis->getTimestamp() * 1000, $label];
+}
+
+function eur_text(float $v): string
+{
+    return number_format($v, 0, ',', '.') . ' €';
+}
+
+function report_text(?int $now = null): array
+{
+    [$from, $to, $label] = report_period($now);
+    $users = rows('SELECT id, name FROM users WHERE active = 1 ORDER BY name');
+    $today = date('Y-m-d', $now ?? time());
+    $lastNote = [];
+    foreach (rows('SELECT client_id, MAX(created_at) AS m FROM notes GROUP BY client_id') as $r) {
+        $lastNote[(int) $r['client_id']] = (int) $r['m'];
+    }
+    foreach (rows("SELECT client_id, MAX(msg_date) AS m FROM emails WHERE direction = 'in' AND client_id IS NOT NULL GROUP BY client_id") as $r) {
+        $lastNote[(int) $r['client_id']] = max($lastNote[(int) $r['client_id']] ?? 0, (int) $r['m']);
+    }
+    $waiting = reminders_due();
+    $cnt = static fn (string $sql, array $p): int => (int) (row($sql, $p)['c'] ?? 0);
+    $tot = ['new' => 0, 'won' => 0, 'wonv' => 0.0, 'acts' => 0, 'sent' => 0, 'replies' => 0];
+    $blocks = [];
+    foreach ($users as $u) {
+        $id = (int) $u['id'];
+        $new = $cnt('SELECT COUNT(*) AS c FROM clients WHERE owner_id = ? AND created_at >= ? AND created_at < ?', [$id, $from, $to]);
+        $acts = $cnt("SELECT COUNT(*) AS c FROM notes WHERE author_id = ? AND type IN ('note','call','meeting','status') AND created_at >= ? AND created_at < ?", [$id, $from, $to]);
+        $calls = $cnt("SELECT COUNT(*) AS c FROM notes WHERE author_id = ? AND type = 'call' AND created_at >= ? AND created_at < ?", [$id, $from, $to]);
+        $meets = $cnt("SELECT COUNT(*) AS c FROM notes WHERE author_id = ? AND type = 'meeting' AND created_at >= ? AND created_at < ?", [$id, $from, $to]);
+        $sent = $cnt("SELECT COUNT(*) AS c FROM emails WHERE user_id = ? AND direction = 'out' AND auto = 0 AND msg_date >= ? AND msg_date < ?", [$id, $from, $to]);
+        $rep = $cnt("SELECT COUNT(*) AS c FROM emails e JOIN clients c ON c.id = e.client_id WHERE c.owner_id = ? AND e.direction = 'in' AND e.msg_date >= ? AND e.msg_date < ?", [$id, $from, $to]);
+        $won = row("SELECT COUNT(*) AS c, COALESCE(SUM(value), 0) AS v FROM clients WHERE owner_id = ? AND status = 'dobiven' AND won_at >= ? AND won_at < ?", [$id, $from, $to]);
+        $open = row("SELECT COUNT(*) AS c, COALESCE(SUM(value), 0) AS v FROM clients WHERE owner_id = ? AND status IN ('novi','kontaktiran','ponuda','pregovori')", [$id]);
+        $late = $cnt("SELECT COUNT(*) AS c FROM clients WHERE owner_id = ? AND status IN ('novi','kontaktiran','ponuda','pregovori') AND next_follow_up IS NOT NULL AND next_follow_up < ?", [$id, $today]);
+        $stale = 0;
+        foreach (rows("SELECT id, created_at FROM clients WHERE owner_id = ? AND status IN ('novi','kontaktiran','ponuda','pregovori')", [$id]) as $c) {
+            $last = max($lastNote[(int) $c['id']] ?? 0, (int) $c['created_at']);
+            if ($last < ($now ?? time()) * 1000 - 14 * DAY_MS) {
+                $stale++;
+            }
+        }
+        $wait = count(array_filter($waiting, static fn ($r) => (int) $r['owner_id'] === $id));
+        $tot['new'] += $new;
+        $tot['won'] += (int) $won['c'];
+        $tot['wonv'] += (float) $won['v'];
+        $tot['acts'] += $acts;
+        $tot['sent'] += $sent;
+        $tot['replies'] += $rep;
+        $attention = [];
+        if ($late) {
+            $attention[] = $late . ' kasni s kontaktom';
+        }
+        if ($stale) {
+            $attention[] = $stale . ' bez kontakta 14+ dana';
+        }
+        if ($wait) {
+            $attention[] = $wait . ' čeka odgovor klijenta';
+        }
+        $blocks[] = $u['name'] . "\n"
+            . '  novi klijenti: ' . $new . ', aktivnosti: ' . $acts . ' (pozivi ' . $calls . ', sastanci ' . $meets . ")\n"
+            . '  e-mailovi poslano: ' . $sent . ', odgovora primljeno: ' . $rep . "\n"
+            . '  dobiveno: ' . (int) $won['c'] . ((int) $won['c'] ? ' (' . eur_text((float) $won['v']) . ')' : '') . "\n"
+            . '  u radu: ' . (int) $open['c'] . ' klijenata, ' . eur_text((float) $open['v']) . "\n"
+            . '  pažnja: ' . ($attention ? implode(', ', $attention) : 'sve u redu');
+    }
+    $unlinked = $cnt("SELECT COUNT(*) AS c FROM emails WHERE direction = 'in' AND client_id IS NULL AND msg_date >= ? AND msg_date < ?", [$from, $to]);
+    $company = company_name();
+    $text = 'Tjedni izvještaj prodaje: ' . $label . "\n" . ($company !== '' ? $company . ' · Prodajni stol' : 'Prodajni stol') . "\n\n"
+        . "UKUPNO\n"
+        . '  novi klijenti: ' . $tot['new'] . "\n"
+        . '  dobiveni poslovi: ' . $tot['won'] . ($tot['won'] ? ' (' . eur_text($tot['wonv']) . ')' : '') . "\n"
+        . '  aktivnosti prodavača: ' . $tot['acts'] . "\n"
+        . '  poslani e-mailovi: ' . $tot['sent'] . ', primljeni odgovori klijenata: ' . $tot['replies'] . "\n"
+        . '  poruke u Inboxu bez klijenta: ' . $unlinked . "\n"
+        . '  klijenti koji čekaju naš podsjetnik (bez odgovora): ' . count($waiting) . "\n\n"
+        . "PO PRODAVAČIMA\n\n" . implode("\n\n", $blocks) . "\n";
+    return ['subject' => 'Tjedni izvještaj prodaje: ' . $label, 'text' => $text];
+}
+
+function send_report(array $recipients, ?int $now = null): int
+{
+    $r = report_text($now);
+    $n = 0;
+    foreach ($recipients as $u) {
+        Mailer::send((string) $u['email'], $r['subject'], $r['text'], null, ['Auto-Submitted' => 'auto-generated']);
+        $n++;
+    }
+    return $n;
+}
+
+/** Monday from 08:00 (or later in the week if the cron was down) the report goes to all active administrators. */
+function weekly_report_if_due(): bool
+{
+    if (setting_get('report_enabled', '1') !== '1' || !Mailer::configured()) {
+        return false;
+    }
+    $week = date('o-\WW');
+    if (meta_get('report_week') === $week) {
+        return false;
+    }
+    if ((int) date('N') === 1 && (int) date('G') < 8) {
+        return false;
+    }
+    $admins = rows("SELECT * FROM users WHERE role = 'admin' AND active = 1");
+    if (!$admins) {
+        return false;
+    }
+    try {
+        send_report($admins);
+    } catch (MailException $e) {
+        error_log('CRM weekly report: ' . $e->getMessage());
+        return false;
+    }
+    meta_set('report_week', $week);
+    return true;
+}
+
+/* ---------- background jobs ---------- */
+
+/** Runs from cron.php and, throttled, from the app. */
+function run_background_jobs(bool $force = false): array
+{
+    $last = (int) (meta_get('bg_last') ?? 0);
+    if (!$force && $last > ms() - 55000) {
+        return [];
+    }
+    meta_set('bg_last', (string) ms());
+    $out = [];
+    try {
+        $out['scheduled'] = process_scheduled();
+        $out['reminders'] = notify_reminders();
+        $out['report'] = weekly_report_if_due();
+    } catch (Throwable $e) {
+        error_log('CRM jobs: ' . $e->getMessage());
+        $out['error'] = $e->getMessage();
+    }
+    return $out;
+}
