@@ -5,6 +5,7 @@ require __DIR__ . '/lib/core.php';
 require __DIR__ . '/lib/mail.php';
 require __DIR__ . '/lib/imap.php';
 require __DIR__ . '/lib/features.php';
+require __DIR__ . '/lib/backup.php';
 require __DIR__ . '/lib/mailcamp.php';
 
 app_boot();
@@ -1155,6 +1156,37 @@ try {
             need_admin($u);
             run('DELETE FROM templates WHERE id = ?', [(int) (body()['id'] ?? 0)]);
             out(['ok' => true]);
+        }
+
+        case 'backup_list': {
+            $u = need_user();
+            need_admin($u);
+            out(['backups' => backup_list(), 'keep' => BACKUP_KEEP, 'doneToday' => backup_today_exists()]);
+        }
+
+        case 'backup_run': {
+            $u = need_write();
+            need_admin($u);
+            $r = backup_create((string) $u['name']);
+            out(['ok' => true, 'name' => $r['name'], 'backups' => backup_list(), 'keep' => BACKUP_KEEP, 'doneToday' => true]);
+        }
+
+        case 'backup_download': {
+            $u = need_user();
+            need_admin($u);
+            $f = (string) ($_GET['f'] ?? '');
+            if (!preg_match('/^crm-backup-\d{8}-\d{6}\.json\.gz$/', $f) || !is_file(backup_dir() . '/' . $f)) {
+                throw new ApiError('Kopija ne postoji.', 404);
+            }
+            $path = backup_dir() . '/' . $f;
+            audit(null, (int) $u['id'], 'backup', 'Preuzeta sigurnosna kopija: ' . $f);
+            header_remove('Content-Type');
+            header('Content-Type: application/gzip');
+            header('Content-Length: ' . filesize($path));
+            header('Content-Disposition: attachment; filename="' . $f . '"');
+            header('Cache-Control: private, no-store');
+            readfile($path);
+            exit;
         }
 
         case 'settings_save': {
