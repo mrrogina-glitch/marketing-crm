@@ -329,7 +329,7 @@ function initApp() {
   }
 
   /* ---------- dnevnik promjena (admin) ---------- */
-  const AUD = { create: 'novo', update: 'izmjena', delete: 'brisanje', status: 'status', campaign: 'kampanja', doc: 'dokument', task: 'zadatak', email: 'e-mail' };
+  const AUD = { create: 'novo', update: 'izmjena', delete: 'brisanje', status: 'status', campaign: 'kampanja', doc: 'dokument', backup: 'backup', task: 'zadatak', email: 'e-mail' };
   const auditLi = (e, withClient) => '<li><span class="when">' + esc(fmtTs(e.at)) + '</span><span class="who">' + esc(e.user) + '</span><span class="tag">' + esc(AUD[e.action] || e.action) + '</span><span class="what">' + (withClient && e.client ? (e.clientId && byId(e.clientId) ? '<button class="lnk" data-open="' + esc(e.clientId) + '">' + esc(e.client) + '</button>: ' : '<b>' + esc(e.client) + '</b>: ') : '') + esc(e.details) + '</span></li>';
   async function loadAudit() {
     if (!isAdmin() || S.auditBusy) return;
@@ -626,6 +626,26 @@ function initApp() {
   }
 
   /* ---------- settings ---------- */
+  function bkHtml() {
+    const b = S.backups;
+    let h = '<header><h3>Sigurnosna kopija (backup)</h3><span class="muted">cijela baza klijenata</span></header><div class="pad">' +
+      '<p class="hint">Kopija se automatski sprema na poslužitelj ako unazad 24 sata nije napravljena. Čuva se zadnjih ' + esc(b ? b.keep : 5) + ' kopija, starije se brišu čim nastane nova. Ručno se može napraviti samo jednom dnevno.</p>';
+    if (!b) return h + '<p class="muted">Učitavanje…</p></div>';
+    h += '<table class="tbl"><thead><tr><th>Datum i vrijeme</th><th>Veličina</th><th></th></tr></thead><tbody>' +
+      (b.backups.length ? b.backups.map((x) => '<tr><td>' + esc(new Date(x.at).toLocaleString('hr-HR')) + '</td><td>' + esc(x.size >= 1048576 ? (x.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(x.size / 1024)) + ' KB') + '</td><td><a class="btn" href="api.php?a=backup_download&f=' + encodeURIComponent(x.name) + '">Preuzmi</a></td></tr>').join('') : '<tr><td colspan="3" class="muted">Još nema kopija.</td></tr>') + '</tbody></table>' +
+      '<div class="msg" id="bkMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="bkrun"' + (b.doneToday ? ' disabled' : '') + '>Napravi kopiju sada</button>' + (b.doneToday ? '<span class="muted">Današnja kopija već postoji.</span>' : '') + '</div></div>';
+    return h;
+  }
+  async function loadBackups() {
+    try { S.backups = await call('backup_list', null, 'GET'); } catch (e) { return; }
+    const p = $('bkPanel'); if (p) p.innerHTML = bkHtml();
+  }
+  async function runBackup() {
+    const m = $('bkMsg'); if (m) m.textContent = 'Izrada kopije…';
+    try { const r = await call('backup_run', {}); S.backups = r; toast('Sigurnosna kopija je spremljena'); } catch (e) { toast(e.message, true); await loadBackups(); return; }
+    const p = $('bkPanel'); if (p) p.innerHTML = bkHtml();
+  }
+
   function renderSettings() {
     const root = $('v-postavke');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
@@ -647,6 +667,7 @@ function initApp() {
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
         '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
+      h += '<section class="panel-b" id="bkPanel">' + bkHtml() + '</section>';
       const ic = S.mail.imap2Cfg || { host: '', port: 993, secure: 'ssl', user: '', folder: 'INBOX', hasPass: false, source: '' };
       h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (samo primanje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
         '<p class="hint">Dodatni sandučić čije se poruke vide u Inboxu pod "Inbox 2". Pošta se i dalje šalje isključivo s adrese ' + esc(S.mail.from || 'marketing@vip-grupa.eu') + '.' + (ic.source === 'config' ? ' Trenutno se koriste podaci iz config.php; spremanjem ovdje zamjenjuju se.' : '') + '</p>' +
@@ -682,6 +703,7 @@ function initApp() {
         '<div class="msg" id="uMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="ucreate">Dodaj korisnika</button></div></div></section>';
     }
     root.innerHTML = h;
+    if (isAdmin()) loadBackups();
   }
   function defaultSigGuess() { return [S.me.name, S.mail.from].filter(Boolean).join('\n'); }
   async function sigSave() {
@@ -1407,6 +1429,7 @@ function initApp() {
       else if (act === 'usave') userSave(a.closest('tr'));
       else if (act === 'ucreate') userCreate();
       else if (act === 'mailtest') mailTest();
+      else if (act === 'bkrun') runBackup();
       return;
     }
     if (t.classList && t.classList.contains('overlay')) closeTop();
