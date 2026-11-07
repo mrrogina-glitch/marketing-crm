@@ -109,7 +109,7 @@ function initApp() {
       S.csrf = d.csrf || S.csrf;
       if (S.offline) { S.offline = false; renderBanner(); }
       if (d.unchanged) return;
-      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
+      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
       S.loaded = true;
       derive();
       renderAll(); updateDrawer();
@@ -156,6 +156,7 @@ function initApp() {
   const unreadCount = () => S.emails.filter((e) => e.dir === 'in' && !e.read).length;
   const kindLabel = (c) => (c.kind === 'osoba' ? 'Fizička osoba' : 'Tvrtka');
   const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+  const ownerAt = (c, ts) => { const h = (S.ownerHist || {})[c.id]; if (!h || !h.length) return c.ownerId; let o = h[0][1]; h.forEach((x) => { if (x[0] <= ts) o = x[1]; }); return o; }; // prodaja se vodi na prodavača koji je vodio klijenta u tom trenutku
   const canDelete = (c) => isAdmin() || String(c.ownerId) === String(S.me.id);
 
   /* ---------- shell ---------- */
@@ -270,13 +271,13 @@ function initApp() {
     const f = from.getTime(), t = to.getTime();
     const users = isAdmin() ? S.users.filter((u) => u.active || S.clients.some((c) => c.ownerId === u.id)) : S.users.filter((u) => u.id === S.me.id);
     const stat = {}; users.forEach((u) => { stat[u.id] = { n: 0, mv: {}, wonV: 0 }; });
-    S.clients.forEach((c) => { if (stat[c.ownerId] && c.createdAt >= f && c.createdAt < t) stat[c.ownerId].n++; });
+    S.clients.forEach((c) => { const o = ownerAt(c, c.createdAt); if (stat[o] && c.createdAt >= f && c.createdAt < t) stat[o].n++; });
     S.notes.forEach((n) => {
       if (n.type !== 'status' || n.createdAt < f || n.createdAt >= t) return;
-      const c = byId(n.clientId); if (!c || !stat[c.ownerId]) return;
+      const c = byId(n.clientId); const ow = c && ownerAt(c, n.createdAt); if (!c || !stat[ow]) return;
       const mm = /→ ([^\n]+)/.exec(n.text || n.body || ''); const st = mm && stageByLabel[mm[1].trim()]; if (!st) return;
-      stat[c.ownerId].mv[st] = (stat[c.ownerId].mv[st] || 0) + 1;
-      if (st === 'dobiven') stat[c.ownerId].wonV += c.value || 0;
+      stat[ow].mv[st] = (stat[ow].mv[st] || 0) + 1;
+      if (st === 'dobiven') stat[ow].wonV += c.value || 0;
     });
     const cols = ['kontaktiran', 'ponuda', 'pregovori', 'aktivni', 'dobiven', 'izgubljen'];
     const tot = { n: 0, mv: {}, wonV: 0 }; Object.values(stat).forEach((x) => { tot.n += x.n; tot.wonV += x.wonV; cols.forEach((k) => { tot.mv[k] = (tot.mv[k] || 0) + (x.mv[k] || 0); }); });
@@ -285,7 +286,7 @@ function initApp() {
       '<label class="f inl">' + (kind === 'weekly' ? 'Tjedan' : 'Mjesec') + '<select id="stPeriod">' + per.map((x, i) => '<option value="' + i + '"' + (i === idx ? ' selected' : '') + '>' + esc(x.label) + (i === 0 ? ' (tekući)' : '') + '</option>').join('') + '</select></label></div>' +
       '<div class="tblwrap"><table class="rev"><thead><tr><th>Prodavač</th><th>Novi klijenti</th>' + cols.map((k) => '<th>' + esc(STAGE[k].label) + '</th>').join('') + '</tr></thead><tbody>' +
       users.map((u) => row(u.name, stat[u.id])).join('') + '</tbody>' + (isAdmin() && users.length > 1 ? '<tfoot>' + row('Ukupno', tot, true) + '</tfoot>' : '') + '</table></div>' +
-      '<p class="muted pad small">Brojevi pokazuju koliko je klijenata prešlo u pojedini status u odabranom razdoblju; klijenti se računaju njihovom prodavaču.</p></div>';
+      '<p class="muted pad small">Brojevi pokazuju koliko je klijenata prešlo u pojedini status u odabranom razdoblju; prodaja se računa prodavaču koji je vodio klijenta u trenutku promjene.</p></div>';
   }
   async function loadRevenue(force) {
     if (S.revBusy || (!force && S.revenue && Date.now() - S.revAt < 30000)) return;
@@ -349,7 +350,7 @@ function initApp() {
     const won = mine.filter((c) => c.status === 'dobiven');
     const due = open.filter(isDue).sort((a, b) => a.nextFollowUp.localeCompare(b.nextFollowUp));
     const stale = open.filter(isStale).sort((a, b) => lastTs(a) - lastTs(b));
-    const rem = isAdmin() ? S.reminders.filter((r) => byId(r.clientId)) : [];
+    const rem = S.reminders.filter((r) => byId(r.clientId));
     const pend = S.scheduled.filter((x) => x.status === 'pending' || x.status === 'sending');
     let h = '';
     if (rem.length) {
@@ -377,7 +378,7 @@ function initApp() {
     h += stale.length ? '<ul class="list">' + stale.slice(0, 8).map((c) => { const t = lastTs(c); return rowLi(c, t ? 'zadnje ' + rel(t) : 'nema bilješki', 'stale'); }).join('') + '</ul>' : '<div class="none">Svi otvoreni klijenti imaju svježu bilješku.</div>';
     h += '</section></div>';
     const tot = S.clients.length;
-    if (!isAdmin()) { root.innerHTML = h; return; }
+    if (!isAdmin()) { root.innerHTML = h + '<section class="panel-b">' + pipeStats() + '</section>'; return; }
     h += '<section class="panel-b"><header><h3>Tijek prodaje</h3><span class="muted nums">' + tot + ' ' + plural(tot, 'klijent', 'klijenata') + '</span></header><div class="pipe"><div class="pipe-bar" role="img" aria-label="Raspodjela klijenata po statusu">' +
       STAGES.map((s) => { const n = S.clients.filter((c) => c.status === s.id).length; return n ? '<i style="flex:' + n + ';background:var(--s-' + s.id + ')" title="' + esc(s.label) + ': ' + n + '"></i>' : ''; }).join('') +
       '</div><div class="pipe-leg">' +
@@ -841,7 +842,7 @@ function initApp() {
     const campHist = (S.campaigns || []).filter((x) => x.clientId === c.id);
     const ownerOpts = ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === c.ownerId ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
     let h = '<div class="sh-h"><div><h2 id="dTitle"></h2><div class="sub"><span id="dPill"></span><span id="dSub"></span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">' +
-      '<div class="sec"><div class="acts"><label class="f">Status<select id="stSel">' + STAGES.map((s) => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('') + '</select></label><button class="btn" data-act="mail">Napiši e-mail</button></div>' +
+      '<div class="sec"><div class="acts"><label class="f">Status<select id="stSel">' + STAGES.map((s) => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('') + '</select></label><button class="btn" data-act="mail">Napiši e-mail</button>' + (String(c.ownerId) !== String(S.me.id) ? '<button class="btn" data-act="take">Preuzmi klijenta</button>' : '') + '</div>' +
       '<div class="pending" id="stPending" hidden><p id="stLabel"></p><textarea id="stText" placeholder="Razlog promjene ili što je dogovoreno (obavezno)"></textarea><div class="msg" id="stMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="stok">Potvrdi promjenu</button><button class="btn sm" data-act="stno">Odustani</button></div></div></div>' +
       '<div class="sec"><h3>Nova bilješka <span class="req" style="font-size:12px">obavezno</span></h3><div class="compose"><div class="row"><label class="f">Vrsta<select id="noteType"><option value="note">Bilješka</option><option value="call">Poziv</option><option value="meeting">Sastanak</option></select></label>' +
       '<label class="f">Sljedeći kontakt<input id="noteFollow" type="date"></label></div><textarea id="noteText" placeholder="Što je dogovoreno ili napravljeno, i koji je sljedeći korak."></textarea>' +
@@ -1142,6 +1143,7 @@ function initApp() {
         $('mdrawer').hidden = true;
         openNew({ emailId: e.id, guess: e.fromName || '', email: e.fromEmail, note: 'Upit e-mailom: ' + (e.subject || '(bez predmeta)') + '\n' + e.preview });
       }
+      else if (act === 'take') { if (confirm('Preuzeti klijenta ' + (byId(S.openId) || {}).name + '? Od sada ga vodite vi, a prodaja se do sada vodi na prethodnog prodavača.')) safe(() => call('client_take', { id: S.openId }), 'Klijent preuzet').then(async (ok) => { if (ok) { await refresh(true); openClient(S.openId, true); } }); }
       else if (act === 'docdel') safe(() => call('doc_delete', { id: a.dataset.id }), 'Dokument obrisan').then((ok) => { if (ok) refresh(true); });
       else if (act === 'schedcancel') safe(() => call('sched_cancel', { id: a.dataset.id }), 'Zakazano slanje otkazano').then((ok) => { if (ok) refresh(true); });
       else if (act === 'remdone') safe(() => call('reminder_done', { email_id: a.dataset.id }), 'Podsjetnik odbačen').then((ok) => { if (ok) refresh(true); });
