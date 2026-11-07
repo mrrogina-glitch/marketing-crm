@@ -322,7 +322,7 @@ function initApp() {
   }
 
   /* ---------- dnevnik promjena (admin) ---------- */
-  const AUD = { create: 'novo', update: 'izmjena', delete: 'brisanje', status: 'status', campaign: 'kampanja', doc: 'dokument', task: 'zadatak' };
+  const AUD = { create: 'novo', update: 'izmjena', delete: 'brisanje', status: 'status', campaign: 'kampanja', doc: 'dokument', task: 'zadatak', email: 'e-mail' };
   const auditLi = (e, withClient) => '<li><span class="when">' + esc(fmtTs(e.at)) + '</span><span class="who">' + esc(e.user) + '</span><span class="tag">' + esc(AUD[e.action] || e.action) + '</span><span class="what">' + (withClient && e.client ? (e.clientId && byId(e.clientId) ? '<button class="lnk" data-open="' + esc(e.clientId) + '">' + esc(e.client) + '</button>: ' : '<b>' + esc(e.client) + '</b>: ') : '') + esc(e.details) + '</span></li>';
   async function loadAudit() {
     if (!isAdmin() || S.auditBusy) return;
@@ -563,7 +563,7 @@ function initApp() {
       h += '<div class="acts"><label class="f">Poveži s klijentom<select id="rLink"><option value="">Odaberite klijenta</option>' + S.clients.slice().sort((a, b) => a.name.localeCompare(b.name, 'hr')).map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>').join('') + '</select></label>' +
         '<button class="btn" data-act="link" data-id="' + esc(e.id) + '">Poveži</button>' + (incoming ? '<button class="btn primary" data-act="mkclient" data-id="' + esc(e.id) + '">Napravi klijenta iz poruke</button>' : '') + '</div>';
     }
-    h += '</div><div class="sec"><h3>Poruka</h3><div class="mailbody">' + esc(e.body) + '</div></div>';
+    h += '</div><div class="sec"><h3>Poruka</h3><div class="mailbody">' + esc(e.body) + '</div><div class="acts" style="margin-top:10px"><button class="btn sm danger" data-act="maildel" data-id="' + esc(e.id) + '">Obriši poruku</button><span class="hint">Briše poruku iz aplikacije (ne i sa poslužitelja e-pošte).</span></div></div>';
     {
       const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
       h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose"><textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
@@ -571,6 +571,11 @@ function initApp() {
     }
     h += '</div>';
     sh.innerHTML = h;
+  }
+  async function deleteMail(id) {
+    if (!confirm('Obrisati ovu poruku iz aplikacije? Radnja se ne može poništiti.')) return;
+    const ok = await safe(() => call('email_delete', { id }), 'Poruka obrisana');
+    if (ok) { S.emails = S.emails.filter((x) => x.id !== id); closeTop(); await refresh(true); }
   }
   async function sendReply(id) {
     const ta = $('rBody'); const body = ta.value.trim();
@@ -1118,6 +1123,7 @@ function initApp() {
       else if (act === 'saveinfo') saveInfo();
       else if (act === 'renew') renewCampaign();
       else if (act === 'taskadd') taskAdd(a);
+      else if (act === 'maildel') deleteMail(a.dataset.id);
       else if (act === 'taskdone' || act === 'taskdel') taskAct(a);
       else if (act === 'stper') { S.stKind = a.dataset.v; S.stIdx = 0; renderOverview(); }
       else if (act === 'revper') { S.revPeriod = a.dataset.v; renderRevenue(); }
