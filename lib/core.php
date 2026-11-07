@@ -254,6 +254,12 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        8 => [
+            "CREATE TABLE user_sessions (id $pk, user_id $big NOT NULL, login_at $big NOT NULL, last_seen_at $big NOT NULL, logout_at $big NULL, end_reason VARCHAR(10) NULL)$opt",
+            "CREATE INDEX ix_usess_user ON user_sessions (user_id, login_at)",
+            "CREATE TABLE user_activity (id $pk, user_id $big NOT NULL, day DATE NOT NULL, ms $big NOT NULL DEFAULT 0)$opt",
+            "CREATE UNIQUE INDEX ux_uact ON user_activity (user_id, day)",
+        ],
         7 => [
             "ALTER TABLE clients ADD camp_value DECIMAL(12,2) NOT NULL DEFAULT 0",
             "CREATE TABLE campaigns (
@@ -406,9 +412,105 @@ function current_user(): ?array
         if (!$u || (int) $u['active'] !== 1) {
             $u = null;
             unset($_SESSION['uid']);
+        } elseif ($u['role'] !== 'admin' && !track_activity($u)) {
+            $u = null;
         }
     }
     return $cache = $u;
+}
+
+const IDLE_LIMIT_MS = 15 * 60 * 1000;
+
+/** Korisnici (ne admin): odjava nakon 15 min bez rada i zbrajanje vremena rada. Vrijeme se broji samo za zahtjeve koje sučelje označi kao aktivne (X-Active). */
+function track_activity(array $u): bool
+{
+    $now = ms();
+    $last = (int) ($_SESSION['last_act'] ?? $now);
+    if ($now - $last > IDLE_LIMIT_MS) {
+        close_user_session('idle', $last);
+        $_SESSION = [];
+        session_destroy();
+        return false;
+    }
+    if (!empty($_SERVER['HTTP_X_ACTIVE'])) {
+        $delta = $now - $last;
+        if ($delta > 0 && $delta <= 90000) {
+            $day = date('Y-m-d');
+            $has = row('SELECT id FROM user_activity WHERE user_id = ? AND day = ?', [$u['id'], $day]);
+            if ($has) {
+                run('UPDATE user_activity SET ms = ms + ? WHERE id = ?', [$delta, $has['id']]);
+            } else {
+                run('INSERT INTO user_activity (user_id, day, ms) VALUES (?, ?, ?)', [$u['id'], $day, $delta]);
+            }
+        }
+        $_SESSION['last_act'] = $now;
+        if (!empty($_SESSION['usid'])) {
+            run('UPDATE user_sessions SET last_seen_at = ? WHERE id = ?', [$now, (int) $_SESSION['usid']]);
+        }
+    }
+    return true;
+}
+
+function open_user_session(array $u): void
+{
+    $now = ms();
+    $_SESSION['last_act'] = $now;
+    unset($_SESSION['usid']);
+    if ($u['role'] !== 'admin') {
+        run('INSERT INTO user_sessions (user_id, login_at, last_seen_at) VALUES (?, ?, ?)', [$u['id'], $now, $now]);
+        $_SESSION['usid'] = insert_id();
+    }
+}
+
+function close_user_session(string $reason, ?int $at = null): void
+{
+    if (!empty($_SESSION['usid'])) {
+        run('UPDATE user_sessions SET logout_at = ?, end_reason = ? WHERE id = ? AND logout_at IS NULL', [$at ?? ms(), $reason, (int) $_SESSION['usid']]);
+        unset($_SESSION['usid']);
+    }
+}
+
+/** Statistika korištenja za administratora. */
+function usage_report(): array
+{
+    $today = date('Y-m-d');
+    $mon = date('Y-m-d', strtotime('monday this week'));
+    $from7 = date('Y-m-d', strtotime('-6 days'));
+    $out = [];
+    foreach (rows("SELECT id, name, role FROM users WHERE active = 1 AND role <> 'admin' ORDER BY name") as $u) {
+        $days = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $days[date('Y-m-d', strtotime("-$i days"))] = 0;
+        }
+        $week = 0;
+        $todayMs = 0;
+        foreach (rows('SELECT day, ms FROM user_activity WHERE user_id = ? AND day >= ?', [$u['id'], min($mon, $from7)]) as $r) {
+            $d = (string) $r['day'];
+            if (isset($days[$d])) {
+                $days[$d] = (int) $r['ms'];
+            }
+            if ($d >= $mon) {
+                $week += (int) $r['ms'];
+            }
+            if ($d === $today) {
+                $todayMs = (int) $r['ms'];
+            }
+        }
+        $ls = row('SELECT login_at, last_seen_at, logout_at FROM user_sessions WHERE user_id = ? ORDER BY login_at DESC LIMIT 1', [$u['id']]);
+        $logins = rows('SELECT login_at, last_seen_at, logout_at, end_reason FROM user_sessions WHERE user_id = ? ORDER BY login_at DESC LIMIT 5', [$u['id']]);
+        $out[] = [
+            'id' => (string) $u['id'],
+            'name' => (string) $u['name'],
+            'todayMs' => $todayMs,
+            'weekMs' => $week,
+            'lastLogin' => $ls ? (int) $ls['login_at'] : 0,
+            'lastSeen' => $ls ? (int) $ls['last_seen_at'] : 0,
+            'online' => $ls && empty($ls['logout_at']) && (int) $ls['last_seen_at'] > ms() - 3 * 60000,
+            'days' => array_map(static fn ($d, $v) => ['d' => $d, 'ms' => $v], array_keys($days), array_values($days)),
+            'logins' => array_map(static fn ($r) => ['at' => (int) $r['login_at'], 'end' => $r['logout_at'] ? (int) $r['logout_at'] : 0, 'why' => (string) ($r['end_reason'] ?? ''), 'seen' => (int) $r['last_seen_at']], $logins),
+        ];
+    }
+    return $out;
 }
 
 function csrf_token(): string
