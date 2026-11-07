@@ -254,6 +254,19 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        7 => [
+            "ALTER TABLE clients ADD camp_value DECIMAL(12,2) NOT NULL DEFAULT 0",
+            "CREATE TABLE campaigns (
+                id $pk,
+                client_id $big NOT NULL,
+                start_date DATE NULL,
+                end_date DATE NOT NULL,
+                value DECIMAL(12,2) NOT NULL DEFAULT 0,
+                created_by $big NULL,
+                created_at $big NOT NULL
+            )$opt",
+            "CREATE INDEX ix_campaigns_client ON campaigns (client_id)",
+        ],
     ];
 
     foreach ($steps as $n => $sqls) {
