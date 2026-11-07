@@ -43,7 +43,7 @@ function initApp() {
   const S = {
     csrf: meta ? meta.content : '', rev: '', loaded: false, offline: false,
     me: { id: '', name: '', email: '', role: 'sales' }, users: [], usersById: {},
-    clients: [], notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '' },
+    clients: [], notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '' },
     byClient: new Map(), clientsById: new Map(), inByClient: new Map(),
     tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', sort: 'activity', iq: '', iFilter: 'all', period: '7',
     openId: null, pendingStatus: null, mailClient: null, mailDocs: new Set(), nFromMail: null, nGuess: '', reportText: '', openMailId: null, lastFocus: null, refreshing: false, syncing: false,
@@ -272,6 +272,7 @@ function initApp() {
     if (S.iFilter === 'unread') a = a.filter((e) => e.dir === 'in' && !e.read);
     else if (S.iFilter === 'in') a = a.filter((e) => e.dir === 'in');
     else if (S.iFilter === 'out') a = a.filter((e) => e.dir === 'out');
+    else if (S.iFilter === 'box2') a = a.filter((e) => e.box === 2);
     else if (S.iFilter === 'nolink') a = a.filter((e) => !e.clientId);
     return a;
   }
@@ -290,6 +291,7 @@ function initApp() {
     const box = $('ilist');
     $('btnSync').disabled = !S.mail.imap || S.syncing;
     $('btnSync').textContent = S.syncing ? 'Osvježavam…' : 'Osvježi poštu';
+    $('optBox2').hidden = !S.mail.imap2;
     $('syncInfo').textContent = S.mail.imap ? 'Zadnje osvježeno: ' + minAgo(S.mail.lastSync) : 'Primanje pošte nije podešeno.';
     if (!S.loaded) { box.innerHTML = '<div class="cnone">Učitavanje…</div>'; return; }
     if (S.iFilter === 'sched') { renderScheduled(box); return; }
@@ -304,7 +306,7 @@ function initApp() {
       const unread = e.dir === 'in' && !e.read;
       return '<button class="mrow' + (unread ? ' unread' : '') + '" data-mail="' + esc(e.id) + '"><span class="dot"></span>' +
         '<span class="m-body"><span class="m-from">' + esc(who) + '</span><span class="m-subj">' + esc(e.subject || '(bez predmeta)') + (e.att ? ' · privitak' : '') + '</span><span class="m-prev">' + esc(e.preview) + '</span></span>' +
-        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (e.auto ? '<span class="chip out">automatski</span>' : '') + '</span></button>';
+        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : '') + '</span></button>';
     }).join('');
   }
   async function syncInbox(force, quiet) {
@@ -332,7 +334,7 @@ function initApp() {
     renderTabs(); if (S.tab === 'inbox') renderInbox();
     const c = e.clientId ? byId(e.clientId) : null;
     const incoming = e.dir === 'in';
-    let h = '<div class="sh-h"><div><h2 id="rSubject">' + esc(e.subject || '(bez predmeta)') + '</h2><div class="sub"><span>' + esc(incoming ? 'Primljeno' : 'Poslano') + '</span><span class="nums">' + fmtDate(e.date) + ' ' + fmtTime(e.date) + '</span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">';
+    let h = '<div class="sh-h"><div><h2 id="rSubject">' + esc(e.subject || '(bez predmeta)') + '</h2><div class="sub"><span>' + esc(incoming ? 'Primljeno' : 'Poslano') + (e.box === 2 ? ' · Inbox 2' : '') + '</span><span class="nums">' + fmtDate(e.date) + ' ' + fmtTime(e.date) + '</span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">';
     h += '<dl class="meta-grid"><dt>Od</dt><dd>' + esc((e.fromName ? e.fromName + ' ' : '') + '<' + e.fromEmail + '>') + '</dd><dt>Za</dt><dd>' + esc(e.to) + '</dd>' +
       (e.att ? '<dt>Privitak</dt><dd>' + ((e.docs && e.docs.length) ? e.docs.map((d) => '<a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a> <span class="hint">' + esc(fmtSize(d.size)) + '</span>').join('<br>') : esc(e.att) + ' <span class="hint">(datoteka nije spremljena, vidi se u webmailu)</span>') + '</dd>' : '') + '</dl>';
     h += '<div class="sec"><h3>Klijent</h3>';
@@ -406,6 +408,7 @@ function initApp() {
       h += '<section class="panel-b"><header><h3>Pošta</h3><span class="muted">sandučić za slanje i primanje</span></header><div class="pad">' +
         '<dl class="meta-grid"><dt>Adresa</dt><dd>' + esc(S.mail.from || 'nije podešena') + '</dd><dt>Slanje (SMTP)</dt><dd>' + (S.mail.enabled ? 'podešeno' : 'nije podešeno') + '</dd>' +
         '<dt>Primanje (IMAP)</dt><dd>' + (S.mail.imap ? 'podešeno, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync)) : 'nije podešeno') + '</dd>' +
+        '<dt>Inbox 2 (samo primanje)</dt><dd>' + (S.mail.imap2 ? 'podešen, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync2)) + (S.mail.error2 && S.mail.error2 !== 'error' ? ' · greška: ' + esc(S.mail.error2) : '') : 'nije podešen (config.php, odjeljak imap2)') + '</dd>' +
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
         '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
