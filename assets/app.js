@@ -43,7 +43,7 @@ function initApp() {
   const S = {
     csrf: meta ? meta.content : '', rev: '', loaded: false, offline: false,
     me: { id: '', name: '', email: '', role: 'sales' }, users: [], usersById: {},
-    clients: [], notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '' },
+    clients: [], notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '', imap2Cfg: null },
     byClient: new Map(), clientsById: new Map(), inByClient: new Map(),
     tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', sort: 'activity', iq: '', iFilter: 'all', period: '7',
     openId: null, pendingStatus: null, mailClient: null, mailDocs: new Set(), nFromMail: null, nGuess: '', reportText: '', openMailId: null, lastFocus: null, refreshing: false, syncing: false,
@@ -412,6 +412,16 @@ function initApp() {
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
         '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
+      const ic = S.mail.imap2Cfg || { host: '', port: 993, secure: 'ssl', user: '', folder: 'INBOX', hasPass: false, source: '' };
+      h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (samo primanje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
+        '<p class="hint">Dodatni sandučić čije se poruke vide u Inboxu pod "Inbox 2". Pošta se i dalje šalje isključivo s adrese ' + esc(S.mail.from || 'marketing@vip-grupa.eu') + '.' + (ic.source === 'config' ? ' Trenutno se koriste podaci iz config.php; spremanjem ovdje zamjenjuju se.' : '') + '</p>' +
+        '<div class="grid2"><label class="f">IMAP poslužitelj<input id="b2Host" value="' + esc(ic.host || 'mail.vip-grupa.eu') + '" autocomplete="off" placeholder="mail.vip-grupa.eu"></label>' +
+        '<label class="f">Port<input id="b2Port" type="number" min="1" max="65535" value="' + esc(ic.port || 993) + '"></label>' +
+        '<label class="f">Sigurnost<select id="b2Sec"><option value="ssl"' + (ic.secure === 'ssl' ? ' selected' : '') + '>SSL/TLS (port 993)</option><option value="tls"' + (ic.secure === 'tls' ? ' selected' : '') + '>STARTTLS (port 143)</option><option value="none"' + (ic.secure === 'none' ? ' selected' : '') + '>Bez šifriranja</option></select></label>' +
+        '<label class="f">Mapa<input id="b2Folder" value="' + esc(ic.folder || 'INBOX') + '" autocomplete="off"></label>' +
+        '<label class="f">Korisnik (e-mail adresa)<input id="b2User" type="email" value="' + esc(ic.user) + '" autocomplete="off"></label>' +
+        '<label class="f">Lozinka<input id="b2Pass" type="password" autocomplete="new-password" placeholder="' + (ic.hasPass ? 'spremljena, ostavite prazno da ostane' : 'lozinka sandučića') + '"></label></div>' +
+        '<div class="msg" id="b2Msg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="b2test">Provjeri vezu</button><button class="btn primary" data-act="b2save">Spremi</button>' + (ic.source === 'settings' ? '<button class="btn danger" data-act="b2clear">Ukloni Inbox 2</button>' : '') + '</div></div></section>';
       const st = S.settings || { autoreply: { enabled: true, subject: '', body: '' }, reportEnabled: true, workHours: '' };
       h += '<section class="panel-b"><header><h3>Automatski odgovor izvan radnog vremena</h3><span class="muted">radno vrijeme: ' + esc(st.workHours) + '</span></header><div class="pad">' +
         '<label class="chk"><input type="checkbox" id="arOn"' + (st.autoreply.enabled ? ' checked' : '') + '> Uključen. Svaki pošiljatelj dobiva najviše jedan automatski odgovor dnevno, a ne odgovara se na automatsku poštu, newslettere i no-reply adrese.</label>' +
@@ -442,6 +452,20 @@ function initApp() {
   async function sigSave() {
     const ok = await safe(() => call('signature_save', { signature: $('sigText').value.trim() }), 'Potpis spremljen');
     if (ok) refresh(true);
+  }
+  function b2Body() { return { host: $('b2Host').value.trim(), port: Number($('b2Port').value) || 993, secure: $('b2Sec').value, folder: $('b2Folder').value.trim(), user: $('b2User').value.trim(), pass: $('b2Pass').value }; }
+  async function b2Test() {
+    const m = $('b2Msg'); m.textContent = 'Provjeravam vezu…';
+    try { const r = await call('imap2_test', b2Body()); m.textContent = r.ok ? 'Veza radi: prijava i mapa su u redu. Kliknite Spremi.' : r.error; } catch (e) { m.textContent = e.message; }
+  }
+  async function b2Save() {
+    const m = $('b2Msg'); m.textContent = '';
+    try { await call('imap2_save', b2Body()); toast('Inbox 2 spremljen'); await refresh(true); renderSettings(); syncInbox(true, true); } catch (e) { m.textContent = e.message; }
+  }
+  async function b2Clear() {
+    if (!confirm('Ukloniti Inbox 2? Već preuzete poruke ostaju u Inboxu.')) return;
+    const ok = await safe(() => call('imap2_clear', {}), 'Inbox 2 uklonjen');
+    if (ok) { await refresh(true); renderSettings(); }
   }
   async function arSave() {
     const m = $('arMsg'); m.textContent = '';
@@ -867,6 +891,9 @@ function initApp() {
       else if (act === 'reportprevm') reportPreview(true);
       else if (act === 'reportsendm') safe(() => call('report_send', { monthly: true }).then((r) => { if (r.ok === false) throw new Error(r.error || 'Slanje nije uspjelo.'); toast('Mjesečni izvještaj poslan na ' + r.to); }));
       else if (act === 'reportsend') safe(() => call('report_send', {}).then((r) => { if (r.ok === false) throw new Error(r.error || 'Slanje nije uspjelo.'); toast('Izvještaj poslan na ' + r.to); }));
+      else if (act === 'b2test') b2Test();
+      else if (act === 'b2save') b2Save();
+      else if (act === 'b2clear') b2Clear();
       else if (act === 'tplsave') tplSave(a.closest('.tplrow'));
       else if (act === 'tplsuggest') tplSuggest(a.closest('.tplrow'));
       else if (act === 'tplrun') tplRun(a.closest('.tplrow'));
