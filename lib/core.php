@@ -254,6 +254,9 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        9 => [
+            "UPDATE clients SET service = ''",
+        ],
         8 => [
             "CREATE TABLE user_sessions (id $pk, user_id $big NOT NULL, login_at $big NOT NULL, last_seen_at $big NOT NULL, logout_at $big NULL, end_reason VARCHAR(10) NULL)$opt",
             "CREATE INDEX ix_usess_user ON user_sessions (user_id, login_at)",
