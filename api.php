@@ -438,7 +438,7 @@ try {
                 'users' => $usersOut,
                 'clients' => $clients,
                 'notes' => $notes,
-                'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
+                'emails' => email_list_out(rows('SELECT id, message_id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'tasks' => $tasks,
                 'approvals' => $u['role'] === 'admin' ? pending_approvals() : [],
                 'ownerHist' => array_map(static fn ($r) => [(string) $r['client_id'], (int) $r['from_at'], (string) $r['owner_id']], rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id')),
