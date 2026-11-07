@@ -254,6 +254,9 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        14 => [
+            "CREATE TABLE mail_batches (batch VARCHAR(24) NOT NULL PRIMARY KEY, user_id $big NOT NULL, subject VARCHAR(255) NOT NULL, body TEXT NOT NULL, total INT NOT NULL DEFAULT 0, send_at $big NOT NULL, status VARCHAR(12) NOT NULL DEFAULT 'approved', created_at $big NOT NULL, decided_by $big NULL, decided_at $big NULL)$opt",
+        ],
         13 => [
             "ALTER TABLE scheduled_emails ADD bulk TINYINT NOT NULL DEFAULT 0",
             "ALTER TABLE scheduled_emails ADD batch VARCHAR(24) NULL",

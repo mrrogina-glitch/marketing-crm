@@ -286,13 +286,15 @@ function bulk_pending_count(?array $u = null): int
 }
 
 /** @param list<int> $ids */
-function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT): array
+function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT, ?int $sendAt = null): array
 {
     $batch = 'g' . date('ymdHis') . dechex(random_int(16, 255));
     $queued = 0;
     $skipped = 0;
     $denied = 0;
     $now = ms();
+    $at = $sendAt ?? $now;
+    $status = $u['role'] === 'admin' ? 'pending' : 'awaiting'; // poruke korisnika čekaju odobrenje administratora
     foreach (array_slice(array_values(array_unique($ids)), 0, 1000) as $id) {
         $c = row('SELECT * FROM clients WHERE id = ?', [$id]);
         $mail = $c ? trim((string) $c['email']) : '';
@@ -308,30 +310,63 @@ function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT): arra
         $sender = $sender ?: $u;
         $subject = mb_substr(fill_template_text($subjectT, $c, (string) $sender['name']), 0, 255);
         $body = fill_template_text($bodyT, $c, (string) $sender['name']);
-        if (row("SELECT id FROM scheduled_emails WHERE client_id = ? AND subject = ? AND status IN ('pending','sending','sent') AND created_at > ?", [$c['id'], $subject, $now - 30 * DAY_MS])) {
+        if (row("SELECT id FROM scheduled_emails WHERE client_id = ? AND subject = ? AND status IN ('awaiting','pending','sending','sent') AND created_at > ?", [$c['id'], $subject, $now - 30 * DAY_MS])) {
             $skipped++;
             continue;
         }
         run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at, bulk, batch)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)',
-            [$sender['id'], $c['id'], $mail, $subject, $body, '', null, $now, 'pending', $now, $batch]);
+            [$sender['id'], $c['id'], $mail, $subject, $body, '', null, $at, $status, $now, $batch]);
         $queued++;
     }
-    return ['queued' => $queued, 'skipped' => $skipped, 'denied' => $denied, 'batch' => $batch];
+    if ($queued > 0) {
+        run('INSERT INTO mail_batches (batch, user_id, subject, body, total, send_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$batch, $u['id'], mb_substr($subjectT, 0, 255), $bodyT, $queued, $at, $status === 'awaiting' ? 'awaiting' : 'approved', $now]);
+    }
+    return ['queued' => $queued, 'skipped' => $skipped, 'denied' => $denied, 'batch' => $batch, 'needsApproval' => $status === 'awaiting', 'sendAt' => $at];
+}
+
+/** Grupne poruke koje čekaju odobrenje administratora. */
+function pending_approvals(): array
+{
+    $out = [];
+    foreach (rows("SELECT * FROM mail_batches WHERE status = 'awaiting' ORDER BY created_at") as $b) {
+        $out[] = ['batch' => (string) $b['batch'], 'user' => user_name_of($b['user_id']), 'userId' => (string) $b['user_id'], 'subject' => (string) $b['subject'],
+            'total' => (int) $b['total'], 'sendAt' => (int) $b['send_at'], 'createdAt' => (int) $b['created_at']];
+    }
+    return $out;
+}
+
+/** Primjeri točno onakvih poruka kakve će primatelji dobiti (uz potpis pošiljatelja). */
+function bulk_samples(string $subjectT, string $bodyT, array $clients, array $u, int $limit = 5): array
+{
+    $out = [];
+    foreach (array_slice($clients, 0, $limit) as $c) {
+        $sender = $c['owner_id'] !== null ? row('SELECT * FROM users WHERE id = ? AND active = 1', [$c['owner_id']]) : null;
+        $sender = $sender ?: $u;
+        $out[] = ['to' => (string) $c['email'], 'name' => (string) $c['name'], 'sender' => (string) $sender['name'],
+            'subject' => mb_substr(fill_template_text($subjectT, $c, (string) $sender['name']), 0, 255),
+            'body' => with_signature(fill_template_text($bodyT, $c, (string) $sender['name']), $sender)];
+    }
+    return $out;
 }
 
 function mail_overview(array $u): array
 {
-    $mine = $u['role'] === 'admin' ? '' : ' AND user_id = ' . (int) $u['id'];
+    $mine = $u['role'] === 'admin' ? '' : ' AND s.user_id = ' . (int) $u['id'];
     $batches = [];
-    foreach (rows("SELECT batch, MIN(created_at) AS created, MIN(subject) AS subject, COUNT(*) AS total,
-            SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent,
-            SUM(CASE WHEN status IN ('pending','sending') THEN 1 ELSE 0 END) AS pending,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-            SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
-        FROM scheduled_emails WHERE bulk = 1 AND batch IS NOT NULL AND created_at > ? $mine GROUP BY batch ORDER BY MIN(created_at) DESC LIMIT 30", [ms() - 60 * DAY_MS]) as $b) {
+    foreach (rows("SELECT s.batch, MIN(s.created_at) AS created, MIN(s.subject) AS subject, COUNT(*) AS total,
+            SUM(CASE WHEN s.status = 'sent' THEN 1 ELSE 0 END) AS sent,
+            SUM(CASE WHEN s.status IN ('pending','sending') THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN s.status = 'awaiting' THEN 1 ELSE 0 END) AS awaiting,
+            SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) AS failed,
+            SUM(CASE WHEN s.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+            MIN(s.send_at) AS send_at, MIN(s.user_id) AS user_id
+        FROM scheduled_emails s WHERE s.bulk = 1 AND s.batch IS NOT NULL AND s.created_at > ? $mine GROUP BY s.batch ORDER BY MIN(s.created_at) DESC LIMIT 30", [ms() - 60 * DAY_MS]) as $b) {
+        $mb = row('SELECT status FROM mail_batches WHERE batch = ?', [$b['batch']]);
         $batches[] = ['batch' => (string) $b['batch'], 'created' => (int) $b['created'], 'subject' => (string) $b['subject'], 'total' => (int) $b['total'],
-            'sent' => (int) $b['sent'], 'pending' => (int) $b['pending'], 'failed' => (int) $b['failed'], 'cancelled' => (int) $b['cancelled']];
+            'sent' => (int) $b['sent'], 'pending' => (int) $b['pending'], 'awaiting' => (int) $b['awaiting'], 'failed' => (int) $b['failed'], 'cancelled' => (int) $b['cancelled'],
+            'sendAt' => (int) $b['send_at'], 'by' => user_name_of($b['user_id']), 'approval' => $mb ? (string) $mb['status'] : 'approved'];
     }
     $pending = bulk_pending_count();
     return [
@@ -343,5 +378,6 @@ function mail_overview(array $u): array
         'eta' => $pending > 0 ? bulk_eta($pending) : null,
         'ai' => ai_enabled(),
         'batches' => $batches,
+        'approvals' => $u['role'] === 'admin' ? pending_approvals() : [],
     ];
 }

@@ -239,10 +239,10 @@ function record_client_email(array $c, array $u, string $to, string $subject, st
 
 const BULK_BURST = 5;  // najviše toliko grupnih poruka po jednom pokretanju
 
-/** Ograničenja grupne pošte: 50 na sat, termin 05–16 sati (config.php 'bulk' služi samo za testiranje). */
+/** Ograničenja grupne pošte: 45 na sat, termin 02–19 sati (config.php 'bulk' služi samo za testiranje). */
 function bulk_cfg(string $k): int
 {
-    $def = ['per_hour' => 50, 'from' => 5, 'to' => 16];
+    $def = ['per_hour' => 45, 'from' => 2, 'to' => 19];
     return (int) cfg('bulk.' . $k, $def[$k]);
 }
 
