@@ -859,7 +859,7 @@ try {
             $u = need_write();
             need_admin($u);
             try {
-                Mailer::send((string) $u['email'], 'Probni e-mail iz Prodajnog stola', "Ako ovo čitate, slanje e-maila radi.\n\nPoslano: " . date('d.m.Y. H:i'), (string) $u['name']);
+                Mailer::send((string) $u['email'], 'Probni e-mail iz VIP MARKET-a', "Ako ovo čitate, slanje e-maila radi.\n\nPoslano: " . date('d.m.Y. H:i'), (string) $u['name']);
             } catch (MailException $e) {
                 out(['ok' => false, 'error' => $e->getMessage()]);
             }
