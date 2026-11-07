@@ -21,7 +21,7 @@ $v = static function (string $f): string {
 <meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex,nofollow">
 <?php if ($user): ?><meta name="csrf" content="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>"><?php endif; ?>
-<title>Prodajni stol</title>
+<title>VIP MARKET</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="<?= $v('app.css') ?>">
 </head>
@@ -29,7 +29,7 @@ $v = static function (string $f): string {
 <body class="auth" data-view="login">
 <main class="auth-box">
   <div class="auth-logo"><img src="<?= $v('logo.png') ?>" alt="VIP grupa" width="380" height="167"></div>
-  <h1 class="authname">Prodajni stol</h1>
+  <h1 class="authname">VIP MARKET</h1>
   <p class="muted">Prijavite se svojim računom.</p>
   <form id="fLogin" class="stack" novalidate>
     <label class="f">E-mail<input id="lEmail" type="email" autocomplete="username" required autofocus></label>
@@ -46,9 +46,9 @@ $v = static function (string $f): string {
 
 <header class="top">
   <div class="in bar">
-    <a class="brand" href="#pregled" aria-label="Prodajni stol">
+    <a class="brand" href="#pregled" aria-label="VIP MARKET">
       <svg viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="1" width="20" height="20" rx="3" fill="var(--accent)"/><path d="M6 7h10M6 11h10M6 15h6" stroke="var(--accent-ink)" stroke-width="1.8" stroke-linecap="round"/></svg>
-      <span>Prodajni stol</span>
+      <span>VIP MARKET</span>
     </a>
     <nav class="tabs" role="tablist" aria-label="Odjeljci">
       <button class="tab" role="tab" data-tab="pregled" id="t-pregled">Pregled</button>
