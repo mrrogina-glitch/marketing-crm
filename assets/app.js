@@ -343,9 +343,10 @@ function initApp() {
         '<button class="btn" data-act="link" data-id="' + esc(e.id) + '">Poveži</button>' + (incoming ? '<button class="btn primary" data-act="mkclient" data-id="' + esc(e.id) + '">Napravi klijenta iz poruke</button>' : '') + '</div>';
     }
     h += '</div><div class="sec"><h3>Poruka</h3><div class="mailbody">' + esc(e.body) + '</div></div>';
-    if (incoming) {
-      h += '<div class="sec"><h3>Odgovor</h3><div class="compose"><textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
-        '<p class="hint">Odgovor odlazi s adrese ' + esc(S.mail.from) + ' na ' + esc(e.replyTo || e.fromEmail) + '. Dodaje se Vaš potpis.</p></div>';
+    {
+      const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
+      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose"><textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
+        '<p class="hint">Odgovor odlazi s adrese ' + esc(S.mail.from) + ' na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
     }
     h += '</div>';
     sh.innerHTML = h;
