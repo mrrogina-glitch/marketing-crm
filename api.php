@@ -654,7 +654,7 @@ try {
         case 'report_preview': {
             need_user();
             need_admin(current_user());
-            out(['ok' => true] + report_text());
+            out(['ok' => true] + report_text(null, ($_GET['period'] ?? '') === 'month'));
         }
 
         case 'report_send': {
@@ -664,7 +664,7 @@ try {
                 throw new ApiError('E-mail još nije podešen.', 409);
             }
             try {
-                send_report([$u]);
+                send_report([$u], null, !empty(body()['monthly']));
             } catch (MailException $e) {
                 out(['ok' => false, 'error' => $e->getMessage()]);
             }
