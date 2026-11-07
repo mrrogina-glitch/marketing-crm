@@ -151,11 +151,12 @@ function initApp() {
     else if (S.loaded && S.mail.error) h = '<div class="banner" role="status">Zadnje osvježavanje pošte nije uspjelo.' + (isAdmin() && S.mail.error !== 'error' ? ' ' + esc(S.mail.error) : '') + '</div>';
     $('banner').innerHTML = h;
   }
-  const ADMIN_TABS = ['tim', 'postavke'];
+  const ADMIN_TABS = ['tim'];
   const tabAllowed = (t) => ADMIN_TABS.indexOf(t) < 0 || isAdmin();
   function renderTabs() {
     if (S.loaded) {
       ADMIN_TABS.forEach((t) => { $('t-' + t).hidden = !isAdmin(); });
+      $('t-postavke').textContent = isAdmin() ? 'Postavke' : 'Moj račun';
       if (!tabAllowed(S.tab)) { S.tab = 'pregled'; try { location.hash = 'pregled'; } catch (e) { /* ignore */ } }
     }
     TABS.forEach((t) => { $('t-' + t).setAttribute('aria-selected', String(S.tab === t)); $('v-' + t).hidden = S.tab !== t; });
@@ -400,7 +401,7 @@ function initApp() {
   function renderSettings() {
     const root = $('v-postavke');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
-    let h = '<h2>Postavke</h2>';
+    let h = '<h2>' + (isAdmin() ? 'Postavke' : 'Moj račun') + '</h2>';
     h += '<section class="panel-b"><header><h3>Moj račun</h3></header><div class="pad"><p><b>' + esc(S.me.name) + '</b> · ' + esc(S.me.email) + ' · ' + (isAdmin() ? 'administrator' : 'prodavač') + '</p>' +
       '<div class="grid2"><label class="f">Trenutna lozinka<input id="pwCur" type="password" autocomplete="current-password"></label><span></span>' +
       '<label class="f">Nova lozinka (najmanje 10 znakova)<input id="pwNew" type="password" autocomplete="new-password"></label>' +
