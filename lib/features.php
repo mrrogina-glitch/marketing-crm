@@ -462,10 +462,15 @@ function maybe_auto_reply(array $h, string $fromEmail, string $subject, string $
 /* ---------- weekly report ---------- */
 
 /** @return array{0:int,1:int,2:string} start (inclusive) and end (exclusive) in ms of the previous full Mon-Sun week, plus a label */
-function report_period(?int $now = null): array
+function report_period(?int $now = null, bool $monthly = false): array
 {
     $tz = new DateTimeZone(date_default_timezone_get());
     $d = (new DateTimeImmutable('@' . ($now ?? time())))->setTimezone($tz);
+    if ($monthly) {
+        $firstThis = $d->modify('first day of this month')->setTime(0, 0);
+        $from = $firstThis->modify('first day of previous month');
+        return [$from->getTimestamp() * 1000, $firstThis->getTimestamp() * 1000, $from->format('m.Y.')];
+    }
     $monThis = $d->modify('monday this week')->setTime(0, 0);
     $from = $monThis->modify('-7 days');
     $label = $from->format('d.m.') . ' – ' . $monThis->modify('-1 day')->format('d.m.Y.');
@@ -477,9 +482,10 @@ function eur_text(float $v): string
     return number_format($v, 0, ',', '.') . ' €';
 }
 
-function report_text(?int $now = null): array
+function report_text(?int $now = null, bool $monthly = false): array
 {
-    [$from, $to, $label] = report_period($now);
+    [$from, $to, $label] = report_period($now, $monthly);
+    $title = $monthly ? 'Mjesečni izvještaj prodaje' : 'Tjedni izvještaj prodaje';
     $users = rows('SELECT id, name FROM users WHERE active = 1 ORDER BY name');
     $today = date('Y-m-d', $now ?? time());
     $lastNote = [];
@@ -528,7 +534,12 @@ function report_text(?int $now = null): array
         if ($wait) {
             $attention[] = $wait . ' čeka odgovor klijenta';
         }
+        $done = [];
+        foreach (rows("SELECT name, service, value FROM clients WHERE owner_id = ? AND status = 'dobiven' AND won_at >= ? AND won_at < ? ORDER BY won_at", [$id, $from, $to]) as $w) {
+            $done[] = '    - ' . $w['name'] . ': ' . ($w['service'] !== '' ? $w['service'] : 'usluga nije upisana') . ((float) $w['value'] > 0 ? ' (' . eur_text((float) $w['value']) . ')' : '');
+        }
         $blocks[] = $u['name'] . "\n"
+            . '  izvršene usluge (' . count($done) . '):' . ($done ? "\n" . implode("\n", $done) : ' nema') . "\n"
             . '  novi klijenti: ' . $new . ', aktivnosti: ' . $acts . ' (pozivi ' . $calls . ', sastanci ' . $meets . ")\n"
             . '  e-mailovi poslano: ' . $sent . ', odgovora primljeno: ' . $rep . "\n"
             . '  dobiveno: ' . (int) $won['c'] . ((int) $won['c'] ? ' (' . eur_text((float) $won['v']) . ')' : '') . "\n"
@@ -537,7 +548,7 @@ function report_text(?int $now = null): array
     }
     $unlinked = $cnt("SELECT COUNT(*) AS c FROM emails WHERE direction = 'in' AND client_id IS NULL AND msg_date >= ? AND msg_date < ?", [$from, $to]);
     $company = company_name();
-    $text = 'Tjedni izvještaj prodaje: ' . $label . "\n" . ($company !== '' ? $company . ' · Prodajni stol' : 'Prodajni stol') . "\n\n"
+    $text = $title . ': ' . $label . "\n" . ($company !== '' ? $company . ' · Prodajni stol' : 'Prodajni stol') . "\n\n"
         . "UKUPNO\n"
         . '  novi klijenti: ' . $tot['new'] . "\n"
         . '  dobiveni poslovi: ' . $tot['won'] . ($tot['won'] ? ' (' . eur_text($tot['wonv']) . ')' : '') . "\n"
@@ -546,12 +557,12 @@ function report_text(?int $now = null): array
         . '  poruke u Inboxu bez klijenta: ' . $unlinked . "\n"
         . '  klijenti koji čekaju naš podsjetnik (bez odgovora): ' . count($waiting) . "\n\n"
         . "PO PRODAVAČIMA\n\n" . implode("\n\n", $blocks) . "\n";
-    return ['subject' => 'Tjedni izvještaj prodaje: ' . $label, 'text' => $text];
+    return ['subject' => $title . ': ' . $label, 'text' => $text];
 }
 
-function send_report(array $recipients, ?int $now = null): int
+function send_report(array $recipients, ?int $now = null, bool $monthly = false): int
 {
-    $r = report_text($now);
+    $r = report_text($now, $monthly);
     $n = 0;
     foreach ($recipients as $u) {
         Mailer::send((string) $u['email'], $r['subject'], $r['text'], null, ['Auto-Submitted' => 'auto-generated']);
@@ -587,6 +598,37 @@ function weekly_report_if_due(): bool
     return true;
 }
 
+/** On the 1st of the month from 08:00 (or later if the cron was down) the report for the previous month goes to all active administrators. */
+function monthly_report_if_due(): bool
+{
+    if (setting_get('report_enabled', '1') !== '1' || !Mailer::configured()) {
+        return false;
+    }
+    $month = date('Y-m');
+    if (meta_get('report_month') === null) {
+        meta_set('report_month', $month); // first run after the update: wait for the next 1st of the month
+        return false;
+    }
+    if (meta_get('report_month') === $month) {
+        return false;
+    }
+    if ((int) date('j') === 1 && (int) date('G') < 8) {
+        return false;
+    }
+    $admins = rows("SELECT * FROM users WHERE role = 'admin' AND active = 1");
+    if (!$admins) {
+        return false;
+    }
+    try {
+        send_report($admins, null, true);
+    } catch (MailException $e) {
+        error_log('CRM monthly report: ' . $e->getMessage());
+        return false;
+    }
+    meta_set('report_month', $month);
+    return true;
+}
+
 /* ---------- background jobs ---------- */
 
 /** Runs from cron.php and, throttled, from the app. */
@@ -602,6 +644,7 @@ function run_background_jobs(bool $force = false): array
         $out['scheduled'] = process_scheduled();
         $out['reminders'] = notify_reminders();
         $out['report'] = weekly_report_if_due();
+        $out['report_month'] = monthly_report_if_due();
     } catch (Throwable $e) {
         error_log('CRM jobs: ' . $e->getMessage());
         $out['error'] = $e->getMessage();
