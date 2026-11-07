@@ -356,3 +356,26 @@ ul.audit .what{flex:1 1 280px;color:var(--ink)}
 .tkform input[id$=Title]{flex:3 1 260px}
 .tkform .btn{flex:none}
 .pstats{border-top:1px solid var(--line);margin-top:6px}.pstats h4{margin:0;font-size:14px}table.rev tr.tot th,table.rev tr.tot td{font-weight:700}
+
+/* e-mail kampanje */
+.mc{display:flex;flex-direction:column;gap:12px}
+.mc .row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.mc .row .f{flex:1 1 220px}
+.mc textarea,.mc input:not([type=checkbox]),.mc select{width:100%}
+.mcst{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.mcst .lbl{font-weight:600;margin-right:6px}
+.mclist{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.mclist .chk small{color:var(--ink-3)}
+.mcline{margin:0 0 8px}
+.mcai{display:flex;flex-direction:column;gap:10px;padding-top:10px}
+.spell:empty{display:none}
+.spell{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--surface)}
+.spell ul{margin:6px 0 10px;padding-left:18px}
+.spell .bad{color:var(--bad);font-weight:600}
+.spell .good{color:var(--good);font-weight:600}
+.spell .okmsg{margin:0;color:var(--good)}
+.aitext{white-space:pre-wrap;font:inherit;background:var(--bg);padding:8px;border-radius:6px}
+#v-kampanje .foot{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+#v-kampanje .foot .msg{margin-right:auto}
+#v-kampanje .panel-b{margin-bottom:16px}
+#v-kampanje table.rev td:not(.nums){text-align:left}
