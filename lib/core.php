@@ -249,6 +249,11 @@ function migrate(PDO $pdo): void
         5 => [
             "ALTER TABLE emails ADD mailbox INT NOT NULL DEFAULT 1",
         ],
+        6 => [
+            "ALTER TABLE clients ADD camp_active TINYINT NOT NULL DEFAULT 0",
+            "ALTER TABLE clients ADD camp_start DATE NULL",
+            "ALTER TABLE clients ADD camp_end DATE NULL",
+        ],
     ];
 
     foreach ($steps as $n => $sqls) {
