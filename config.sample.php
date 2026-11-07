@@ -59,4 +59,11 @@ return [
     //     'pass' => '',
     //     'folder' => 'INBOX',
     // ],
+
+    // AI pisanje e-mailova i lektura (Anthropic API). Bez ključa tipke "Napiši s AI" javljaju da AI nije uključen.
+    // Ključ se dobiva na console.anthropic.com. Ne dijelite ga i ne šaljite ga e-mailom.
+    // 'ai' => [
+    //     'key' => '',
+    //     'model' => 'claude-sonnet-5-5',
+    // ],
 ];

@@ -5,6 +5,7 @@ require __DIR__ . '/lib/core.php';
 require __DIR__ . '/lib/mail.php';
 require __DIR__ . '/lib/imap.php';
 require __DIR__ . '/lib/features.php';
+require __DIR__ . '/lib/mailcamp.php';
 
 app_boot();
 send_security_headers(false);
@@ -144,6 +145,7 @@ function note_out(array $r): array
         'type' => (string) $r['type'],
         'subject' => $r['subject'] !== null ? (string) $r['subject'] : '',
         'to' => $r['to_email'] !== null ? (string) $r['to_email'] : '',
+        'bulk' => (int) ($r['bulk'] ?? 0) === 1,
         'text' => (string) $r['body'],
         'createdAt' => (int) $r['created_at'],
     ];
@@ -429,7 +431,7 @@ try {
                 out($base + ['unchanged' => true]);
             }
             $clients = array_map('client_out', rows('SELECT * FROM clients ORDER BY id'));
-            $notes = array_map('note_out', rows('SELECT id, client_id, author_id, type, subject, body, to_email, created_at FROM notes ORDER BY created_at DESC, id DESC LIMIT 20000'));
+            $notes = array_map('note_out', rows('SELECT id, client_id, author_id, type, subject, body, to_email, created_at, bulk FROM notes ORDER BY created_at DESC, id DESC LIMIT 20000'));
             out($base + [
                 'me' => ['id' => (string) $u['id'], 'name' => (string) $u['name'], 'email' => (string) $u['email'], 'role' => (string) $u['role'],
                     'signature' => $sig, 'signatureEffective' => effective_signature($u)],
@@ -937,6 +939,85 @@ try {
             $sig = f_str(body(), 'signature', 1000, 'Potpis');
             run('UPDATE users SET signature = ? WHERE id = ?', [$sig !== '' ? $sig : null, $u['id']]);
             out(['ok' => true]);
+        }
+
+        case 'mail_overview': {
+            $u = need_user();
+            out(['ok' => true] + mail_overview($u));
+        }
+
+        case 'spell_check': {
+            $u = need_write();
+            $in = body();
+            $subject = (string) ($in['subject'] ?? '');
+            $text = (string) ($in['body'] ?? '');
+            if (mb_strlen($text) > 20000 || mb_strlen($subject) > 500) {
+                throw new ApiError('Tekst je predug za provjeru.');
+            }
+            $a = hr_spell_scan($subject);
+            $b = hr_spell_scan($text);
+            $res = ['ok' => true, 'issues' => array_merge($a['issues'], $b['issues']), 'subject' => $a['fixed'], 'body' => $b['fixed'], 'ai' => null];
+            if (!empty($in['ai']) && ai_enabled() && trim($text) !== '') {
+                ai_rate_check((int) $u['id']);
+                $res['ai'] = ai_proofread($b['fixed']);
+            }
+            out($res);
+        }
+
+        case 'ai_draft': {
+            $u = need_write();
+            $in = body();
+            $client = !empty($in['client_id']) ? load_client((string) $in['client_id']) : null;
+            ai_rate_check((int) $u['id']);
+            out(['ok' => true] + ai_draft($in + ['single' => $client !== null], $u, $client));
+        }
+
+        case 'bulk_preview': {
+            $u = need_write();
+            $in = body();
+            $r = bulk_clients($u, is_array($in['audience'] ?? null) ? $in['audience'] : []);
+            $stat = [];
+            foreach (rows("SELECT client_id, COUNT(*) AS c, MAX(created_at) AS m FROM notes WHERE type = 'email' GROUP BY client_id") as $x) {
+                $stat[(int) $x['client_id']] = [(int) $x['c'], (int) $x['m']];
+            }
+            $list = array_map(static fn ($c) => ['id' => (string) $c['id'], 'name' => (string) $c['name'], 'email' => (string) $c['email'], 'status' => (string) $c['status'],
+                'owner' => user_name_of($c['owner_id']), 'mails' => $stat[(int) $c['id']][0] ?? 0, 'last' => $stat[(int) $c['id']][1] ?? null], array_slice($r['clients'], 0, 1000));
+            $n = count($r['clients']);
+            out(['ok' => true, 'clients' => $list, 'total' => $n, 'noEmail' => $r['noEmail'], 'eta' => bulk_eta(bulk_pending_count() + $n)]);
+        }
+
+        case 'bulk_send': {
+            $u = need_write();
+            $in = body();
+            if (!Mailer::configured()) {
+                throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
+            }
+            $subject = f_str($in, 'subject', 255, 'Predmet', true);
+            if (preg_match('/[\r\n]/', $subject)) {
+                throw new ApiError('Predmet mora biti u jednom retku.');
+            }
+            $text = f_str($in, 'body', 20000, 'Poruka', true);
+            $ids = array_values(array_filter(array_map('intval', is_array($in['ids'] ?? null) ? $in['ids'] : [])));
+            if (!$ids) {
+                throw new ApiError('Odaberite barem jednog primatelja.');
+            }
+            $r = transaction(static fn () => bulk_queue($u, $ids, $subject, $text));
+            if ($r['queued'] === 0) {
+                throw new ApiError('Nijedna poruka nije stavljena u red' . ($r['skipped'] ? ' (primatelji su već dobili poruku s istim predmetom u zadnjih 30 dana ili nemaju ispravnu adresu).' : '.'));
+            }
+            out(['ok' => true] + $r + ['eta' => bulk_eta(bulk_pending_count())]);
+        }
+
+        case 'bulk_cancel': {
+            $u = need_write();
+            $batch = (string) (body()['batch'] ?? '');
+            $sql = "UPDATE scheduled_emails SET status = 'cancelled' WHERE batch = ? AND bulk = 1 AND status IN ('pending','failed')";
+            $p = [$batch];
+            if ($u['role'] !== 'admin') {
+                $sql .= ' AND user_id = ?';
+                $p[] = $u['id'];
+            }
+            out(['ok' => true, 'cancelled' => run($sql, $p)]);
         }
 
         case 'template_save': {
