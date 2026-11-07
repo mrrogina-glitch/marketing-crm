@@ -301,3 +301,17 @@ fieldset.aud legend{font-weight:600;padding:0 6px}
 .renew{margin-top:10px;padding:10px;border:1px solid var(--short);background:var(--short-soft);border-radius:8px}
 .renew .grid2{margin-top:8px}
 .camphist{margin:4px 0 0;padding-left:18px;font-size:13px}
+
+.chip.ok{background:var(--accent-soft);color:var(--accent)}
+.usage{padding:4px 16px 12px}
+.urow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px;padding:10px 0;border-top:1px solid var(--line)}
+.urow:first-child{border-top:0}
+.urow .un{flex:1 1 200px;display:flex;flex-direction:column}
+.urow .un small{color:var(--ink-2);font-size:12px}
+.urow .ut{display:flex;flex-direction:column;min-width:96px}
+.urow .ut span{font-size:11.5px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.03em}
+.ubars{display:flex;align-items:flex-end;gap:3px;height:36px}
+.ubars i{display:block;width:8px;background:var(--accent);border-radius:2px 2px 0 0;opacity:.8}
+.ulog{flex:1 0 100%;font-size:12.5px;color:var(--ink-2)}
+.ulog ul{margin:4px 0 0;padding-left:18px}
+.urow .un .chip{align-self:flex-start}

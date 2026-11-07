@@ -75,8 +75,12 @@ function initApp() {
     clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 4500);
   }
 
+  let lastInput = Date.now();
+  ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'].forEach((e) => window.addEventListener(e, () => { lastInput = Date.now(); }, { passive: true, capture: true }));
+  const activeHdr = (h) => { if (Date.now() - lastInput < 60000) h['X-Active'] = '1'; return h; };
+
   async function call(action, body, method) {
-    const opt = { method: method || 'POST', credentials: 'same-origin', headers: {} };
+    const opt = { method: method || 'POST', credentials: 'same-origin', headers: activeHdr({}) };
     if (opt.method === 'POST') {
       opt.headers['Content-Type'] = 'application/json';
       opt.headers['X-CSRF'] = S.csrf;
@@ -199,7 +203,7 @@ function initApp() {
   function renderOverview() {
     const root = $('v-pregled');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
-    if (!S.clients.length) { root.innerHTML = emptyHtml(); return; }
+    if (!S.clients.length) { root.innerHTML = emptyHtml() + (isAdmin() ? '<section class="panel-b" id="usagePanel" style="margin-top:16px"></section>' : ''); if (isAdmin()) { renderUsage(); loadUsage(); } return; }
     const open = S.clients.filter(isOpen);
     const won = S.clients.filter((c) => c.status === 'dobiven');
     const due = open.filter(isDue).sort((a, b) => a.nextFollowUp.localeCompare(b.nextFollowUp));
@@ -236,7 +240,34 @@ function initApp() {
       '</div><div class="pipe-leg">' +
       STAGES.map((s) => { const a = S.clients.filter((c) => c.status === s.id); return '<div><span class="nm" style="--dot:var(--s-' + s.id + ')"><i></i>' + esc(s.label) + '</span><b>' + a.length + '</b><small class="nums">' + eur(sumVal(a)) + '</small></div>'; }).join('') +
       '</div></div></section>';
+    if (isAdmin()) h += '<section class="panel-b" id="usagePanel"></section>';
     root.innerHTML = h;
+    if (isAdmin()) { renderUsage(); loadUsage(); }
+  }
+
+  const fmtTs = (ts) => { const d = new Date(ts); return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '. ' + fmtTime(ts); };
+  const hm = (ms) => { const m = Math.round((ms || 0) / 60000); return Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') + ' min'; };
+  const WD = ['ned', 'pon', 'uto', 'sri', 'čet', 'pet', 'sub'];
+  async function loadUsage() {
+    if (!isAdmin() || S.usageBusy) return;
+    S.usageBusy = true;
+    try { const d = await call('usage', null, 'GET'); S.usage = d.usage || []; if (S.tab === 'pregled') renderUsage(); } catch (e) { /* ignore */ } finally { S.usageBusy = false; }
+  }
+  function renderUsage() {
+    const el = $('usagePanel'); if (!el) return;
+    const U = S.usage || [];
+    let h = '<header><h3>Korištenje aplikacije</h3><span class="muted">aktivno vrijeme prodavača · odjava nakon 15 min mirovanja</span></header>';
+    if (!U.length) { el.innerHTML = h + '<p class="muted" style="padding:14px 16px">Nema prodavača.</p>'; return; }
+    h += '<div class="usage">' + U.map((u) => {
+      const max = Math.max.apply(null, u.days.map((d) => d.ms).concat([3600000]));
+      return '<div class="urow"><div class="un"><b>' + esc(u.name) + '</b>' + (u.online ? ' <span class="chip ok">na mreži</span>' : '') +
+        '<small>' + (u.lastLogin ? 'prijava ' + esc(fmtTs(u.lastLogin)) : 'još se nije prijavio/la') + '</small></div>' +
+        '<div class="ut"><span>Danas</span><b class="nums">' + hm(u.todayMs) + '</b></div>' +
+        '<div class="ut"><span>Ovaj tjedan</span><b class="nums">' + hm(u.weekMs) + '</b></div>' +
+        '<div class="ubars" title="zadnjih 7 dana">' + u.days.map((d) => '<i style="height:' + Math.max(3, Math.round(d.ms / max * 34)) + 'px" title="' + esc(WD[new Date(d.d + 'T12:00:00').getDay()] + ' ' + d.d.slice(8) + '.' + d.d.slice(5, 7) + '.: ' + hm(d.ms)) + '"></i>').join('') + '</div></div>' +
+        (u.logins.length ? '<details class="ulog"><summary>Zadnje prijave</summary><ul>' + u.logins.map((l) => '<li>' + esc(fmtTs(l.at)) + ' → ' + (l.end ? esc(fmtTs(l.end)) + (l.why === 'idle' ? ' (odjava zbog neaktivnosti)' : '') : (u.online && l === u.logins[0] ? 'u tijeku' : esc(fmtTs(l.seen)) + ' (zadnja aktivnost)')) + '</li>').join('') + '</ul></details>' : '');
+    }).join('') + '</div>';
+    el.innerHTML = h;
   }
 
   function campLi(c) {
@@ -882,7 +913,7 @@ function initApp() {
   async function uploadDoc(file, clientId) {
     if (file.size > 10 * 1048576) throw new Error('Datoteka je prevelika (najviše 10 MB).');
     const fd = new FormData(); fd.append('client_id', clientId); fd.append('file', file);
-    const res = await fetch('api.php?a=doc_upload', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF': S.csrf }, body: fd });
+    const res = await fetch('api.php?a=doc_upload', { method: 'POST', credentials: 'same-origin', headers: activeHdr({ 'X-CSRF': S.csrf }), body: fd });
     let d = null; try { d = await res.json(); } catch (e) { /* ignore */ }
     if (res.status === 401) { location.reload(); throw new Error('Sesija je istekla.'); }
     if (!res.ok) throw new Error((d && d.error) || 'Učitavanje datoteke nije uspjelo.');
@@ -1008,6 +1039,7 @@ function initApp() {
   renderTabs(); renderAll();
   refresh(true).then(() => { if (S.tab === 'postavke') renderSettings(); if (S.tab === 'inbox') syncInbox(false, true); });
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 20000);
+  setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'pregled') loadUsage(); }, 60000);
   setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'inbox') syncInbox(false, true); }, 120000);
 }
 })();
