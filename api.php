@@ -452,12 +452,23 @@ try {
             $u = need_write();
             $in = body();
             $orig = load_email((string) ($in['email_id'] ?? ''));
-            if ($orig['direction'] !== 'in') {
-                throw new ApiError('Odgovoriti se može samo na pristiglu poruku.');
+            if ($orig['direction'] === 'in') {
+                $to = (string) ($orig['reply_to'] !== '' ? $orig['reply_to'] : $orig['from_email']);
+            } else {
+                $to = '';
+                foreach (preg_split('/[,;]+/', (string) $orig['to_email']) as $cand) {
+                    if (preg_match('/<([^>]+)>/', $cand, $m)) {
+                        $cand = $m[1];
+                    }
+                    $cand = trim($cand);
+                    if (filter_var($cand, FILTER_VALIDATE_EMAIL)) {
+                        $to = $cand;
+                        break;
+                    }
+                }
             }
-            $to = (string) ($orig['reply_to'] !== '' ? $orig['reply_to'] : $orig['from_email']);
             if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-                throw new ApiError('Pošiljatelj nema ispravnu adresu za odgovor.');
+                throw new ApiError('Poruka nema ispravnu adresu za odgovor.');
             }
             $text = f_str($in, 'body', 20000, 'Odgovor', true);
             $subject = preg_match('/^\s*(re|odg)\s*:/i', (string) $orig['subject']) ? (string) $orig['subject'] : 'Re: ' . $orig['subject'];
