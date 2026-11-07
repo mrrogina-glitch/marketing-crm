@@ -632,14 +632,149 @@ function monthly_report_if_due(): bool
 /* ---------- background jobs ---------- */
 
 /** Runs from cron.php and, throttled, from the app. */
-/** Moves the client's current campaign into the history (if it has dates). */
+/** Moves the client's current campaign into the history (if it has dates). Usluga i prodavač se bilježe uz kampanju. */
 function archive_campaign(array $c, int $userId): void
 {
     if (empty($c['camp_end'])) {
         return;
     }
-    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms()]);
+    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms(), (string) ($c['service'] ?? ''), $c['owner_id'] ?? null]);
+}
+
+/* ---------- dnevnik promjena ---------- */
+
+function audit(?int $clientId, ?int $userId, string $action, string $details, string $clientName = ''): void
+{
+    if ($clientName === '' && $clientId) {
+        $r = row('SELECT name FROM clients WHERE id = ?', [$clientId]);
+        $clientName = $r ? (string) $r['name'] : '';
+    }
+    run('INSERT INTO audit_log (client_id, client_name, user_id, at, action, details) VALUES (?, ?, ?, ?, ?, ?)',
+        [$clientId, mb_substr($clientName, 0, 190), $userId, ms(), $action, mb_substr($details, 0, 3000)]);
+}
+
+function user_name_of($id): string
+{
+    static $c = [];
+    $id = (int) $id;
+    if (!isset($c[$id])) {
+        $r = row('SELECT name FROM users WHERE id = ?', [$id]);
+        $c[$id] = $r ? (string) $r['name'] : '—';
+    }
+    return $c[$id];
+}
+
+/** Opis promjena između starog zapisa klijenta i novih vrijednosti. */
+function client_diff(array $old, array $new): string
+{
+    $labels = ['kind' => 'Vrsta', 'name' => 'Naziv', 'contact' => 'Kontakt osoba', 'oib' => 'OIB', 'email' => 'E-mail', 'phone' => 'Telefon', 'service' => 'Usluga',
+        'value' => 'Procijenjena vrijednost', 'owner_id' => 'Prodavač', 'next_follow_up' => 'Sljedeći kontakt',
+        'camp_active' => 'Aktivna kampanja', 'camp_start' => 'Kampanja od', 'camp_end' => 'Kampanja do', 'camp_value' => 'Vrijednost kampanje'];
+    $parts = [];
+    foreach ($labels as $k => $label) {
+        if (!array_key_exists($k, $new)) {
+            continue;
+        }
+        $o = $old[$k] ?? '';
+        $n = $new[$k];
+        if (in_array($k, ['value', 'camp_value'], true)) {
+            $o = (float) $o;
+            $n = (float) $n;
+        } elseif ($k === 'camp_active') {
+            $o = (int) $o;
+            $n = (int) $n;
+        } else {
+            $o = (string) ($o ?? '');
+            $n = (string) ($n ?? '');
+        }
+        if ($o == $n) {
+            continue;
+        }
+        $fmt = static function ($v) use ($k): string {
+            if ($k === 'owner_id') {
+                return user_name_of($v);
+            }
+            if ($k === 'camp_active') {
+                return $v ? 'da' : 'ne';
+            }
+            if (in_array($k, ['value', 'camp_value'], true)) {
+                return number_format((float) $v, 2, ',', '.') . ' €';
+            }
+            return $v === '' ? '(prazno)' : (string) $v;
+        };
+        $parts[] = $label . ': ' . $fmt($o) . ' → ' . $fmt($n);
+    }
+    return implode('; ', $parts);
+}
+
+/* ---------- zadaci ---------- */
+
+function task_out(array $r): array
+{
+    return ['id' => (string) $r['id'], 'clientId' => $r['client_id'] !== null ? (string) $r['client_id'] : '', 'title' => (string) $r['title'],
+        'due' => (string) ($r['due_date'] ?? ''), 'assigneeId' => (string) $r['assignee_id'], 'createdBy' => (string) $r['created_by'],
+        'createdAt' => (int) $r['created_at'], 'doneAt' => $r['done_at'] !== null ? (int) $r['done_at'] : 0];
+}
+
+function tasks_for(array $u): array
+{
+    $since = ms() - 7 * DAY_MS;
+    if ($u['role'] === 'admin') {
+        $rs = rows('SELECT * FROM tasks WHERE done_at IS NULL OR done_at > ? ORDER BY id', [$since]);
+    } else {
+        $rs = rows('SELECT * FROM tasks WHERE (assignee_id = ? OR created_by = ?) AND (done_at IS NULL OR done_at > ?) ORDER BY id', [$u['id'], $u['id'], $since]);
+    }
+    return array_map('task_out', $rs);
+}
+
+/* ---------- prihod od kampanja ---------- */
+
+/** Vrijednost kampanje pripada tjednu/mjesecu početka kampanje; ako klijent ima više usluga, dijeli se jednako. */
+function revenue_report(array $u): array
+{
+    $admin = $u['role'] === 'admin';
+    $from = date('Y-m-d', strtotime('-400 days'));
+    $items = [];
+    foreach (rows('SELECT start_date, end_date, value, service, owner_id FROM campaigns') as $r) {
+        $items[] = [($r['start_date'] ?: $r['end_date']), (float) $r['value'], (string) $r['service'], $r['owner_id']];
+    }
+    foreach (rows('SELECT camp_start, camp_end, camp_value, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
+        $items[] = [($r['camp_start'] ?: $r['camp_end']), (float) $r['camp_value'], (string) $r['service'], $r['owner_id']];
+    }
+    $w = [];
+    $m = [];
+    foreach ($items as [$d, $v, $svc, $owner]) {
+        if (!$d || $d < $from || $v <= 0) {
+            continue;
+        }
+        if (!$admin && (int) $owner !== (int) $u['id']) {
+            continue;
+        }
+        $list = array_values(array_filter(array_map('trim', explode(',', $svc)), static fn ($x) => $x !== ''));
+        if (!$list) {
+            $list = ['Bez usluge'];
+        }
+        $part = $v / count($list);
+        $wk = date('Y-m-d', strtotime('monday this week', strtotime($d)));
+        $mo = substr($d, 0, 7);
+        foreach ($list as $s) {
+            $o = (string) ($owner ?? '0');
+            $kw = $wk . '|' . $o . '|' . $s;
+            $km = $mo . '|' . $o . '|' . $s;
+            $w[$kw] = ($w[$kw] ?? 0) + $part;
+            $m[$km] = ($m[$km] ?? 0) + $part;
+        }
+    }
+    $fmt = static function (array $a): array {
+        $o = [];
+        foreach ($a as $k => $v) {
+            [$p, $own, $s] = explode('|', $k, 3);
+            $o[] = ['p' => $p, 'u' => $own, 's' => $s, 'v' => round($v, 2)];
+        }
+        return $o;
+    };
+    return ['weekly' => $fmt($w), 'monthly' => $fmt($m), 'scope' => $admin ? 'all' : 'mine'];
 }
 
 const STAGE_LABELS = ['novi' => 'Novi kontakt', 'kontaktiran' => 'Kontaktiran', 'ponuda' => 'Ponuda poslana', 'pregovori' => 'Pregovori', 'aktivni' => 'Aktivni', 'dobiven' => 'Dobiven', 'izgubljen' => 'Izgubljen'];
@@ -666,6 +801,7 @@ function expire_campaigns(): int
             $lose = $c['status'] === 'aktivni'; // dobiven/izgubljen i ostali ručno postavljeni statusi ostaju
             run('UPDATE clients SET camp_active = 0, camp_start = NULL, camp_end = NULL, camp_value = 0, status = ?, updated_at = ? WHERE id = ?', [$lose ? 'izgubljen' : $c['status'], $t, $c['id']]);
             $why = 'Kampanja je završila ' . date('d.m.Y.', strtotime($c['camp_end'])) . ', vrijednost ' . number_format((float) $c['camp_value'], 2, ',', '.') . ' €.';
+            audit((int) $c['id'], null, 'campaign', ($lose ? 'Status: Aktivni → Izgubljen. ' : '') . $why, (string) $c['name']);
             run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
                 [$c['id'], $c['owner_id'], $lose ? 'status' : 'note', $lose ? STAGE_LABELS['aktivni'] . ' → Izgubljen' . "\n" . $why : $why, $t]);
         });

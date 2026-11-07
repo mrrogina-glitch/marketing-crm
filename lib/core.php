@@ -254,6 +254,17 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        10 => [
+            "CREATE TABLE tasks (id $pk, client_id $big NULL, title VARCHAR(300) NOT NULL, due_date DATE NULL, assignee_id $big NOT NULL, created_by $big NOT NULL, created_at $big NOT NULL, done_at $big NULL)$opt",
+            "CREATE INDEX ix_tasks_assignee ON tasks (assignee_id, done_at)",
+            "CREATE INDEX ix_tasks_client ON tasks (client_id)",
+            "CREATE TABLE audit_log (id $pk, client_id $big NULL, client_name VARCHAR(190) NOT NULL DEFAULT '', user_id $big NULL, at $big NOT NULL, action VARCHAR(20) NOT NULL, details TEXT NOT NULL)$opt",
+            "CREATE INDEX ix_audit_client ON audit_log (client_id, at)",
+            "CREATE INDEX ix_audit_at ON audit_log (at)",
+            "ALTER TABLE campaigns ADD service VARCHAR(120) NOT NULL DEFAULT ''",
+            "ALTER TABLE campaigns ADD owner_id $big NULL",
+            "UPDATE campaigns SET service = COALESCE((SELECT service FROM clients WHERE clients.id = campaigns.client_id), ''), owner_id = (SELECT owner_id FROM clients WHERE clients.id = campaigns.client_id)",
+        ],
         9 => [
             "UPDATE clients SET service = ''",
         ],
@@ -278,6 +289,7 @@ function migrate(PDO $pdo): void
         ],
     ];
 
+    ksort($steps);
     foreach ($steps as $n => $sqls) {
         if ($n <= $ver) {
             continue;
