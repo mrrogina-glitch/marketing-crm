@@ -309,6 +309,69 @@ try {
             out(['usage' => usage_report()]);
         }
 
+        case 'revenue': {
+            $u = need_user();
+            out(revenue_report($u));
+        }
+
+        case 'audit_list': {
+            $u = need_user();
+            need_admin($u);
+            $cid = (int) ($_GET['client_id'] ?? 0);
+            $lim = max(1, min(500, (int) ($_GET['limit'] ?? 150)));
+            $rs = $cid ? rows('SELECT * FROM audit_log WHERE client_id = ? ORDER BY at DESC, id DESC LIMIT ' . $lim, [$cid])
+                       : rows('SELECT * FROM audit_log ORDER BY at DESC, id DESC LIMIT ' . $lim);
+            out(['entries' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => $r['client_id'] !== null ? (string) $r['client_id'] : '', 'client' => (string) $r['client_name'],
+                'user' => $r['user_id'] !== null ? user_name_of($r['user_id']) : 'Sustav', 'at' => (int) $r['at'], 'action' => (string) $r['action'], 'details' => (string) $r['details']], $rs)]);
+        }
+
+        case 'task_create': {
+            $u = need_write();
+            $in = body();
+            $title = f_str($in, 'title', 300, 'Zadatak', true);
+            $due = f_date($in['due'] ?? '');
+            if ($due === null) {
+                throw new ApiError('Odaberite rok zadatka.');
+            }
+            $cid = null;
+            $cname = '';
+            if (!empty($in['client_id'])) {
+                $c = load_client((string) $in['client_id']);
+                $cid = (int) $c['id'];
+                $cname = (string) $c['name'];
+            }
+            $assignee = (int) $u['id'];
+            if ($u['role'] === 'admin' && !empty($in['assignee_id'])) {
+                $assignee = active_user_id($in['assignee_id'], (int) $u['id']);
+            }
+            run('INSERT INTO tasks (client_id, title, due_date, assignee_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)', [$cid, $title, $due, $assignee, $u['id'], ms()]);
+            $tid = insert_id();
+            audit($cid, (int) $u['id'], 'task', 'Zadatak: ' . $title . ' (rok ' . date('d.m.Y.', strtotime($due)) . ', ' . user_name_of($assignee) . ')', $cname);
+            out(['ok' => true, 'id' => (string) $tid]);
+        }
+
+        case 'task_done':
+        case 'task_delete': {
+            $u = need_write();
+            $in = body();
+            $t = row('SELECT * FROM tasks WHERE id = ?', [(int) ($in['id'] ?? 0)]);
+            if (!$t) {
+                throw new ApiError('Zadatak ne postoji.', 404);
+            }
+            if ($u['role'] !== 'admin' && (int) $t['assignee_id'] !== (int) $u['id'] && (int) $t['created_by'] !== (int) $u['id']) {
+                throw new ApiError('Zadatak može mijenjati administrator, izvršitelj ili autor.', 403);
+            }
+            if ($action === 'task_delete') {
+                run('DELETE FROM tasks WHERE id = ?', [$t['id']]);
+                audit($t['client_id'] !== null ? (int) $t['client_id'] : null, (int) $u['id'], 'task', 'Zadatak obrisan: ' . $t['title']);
+            } else {
+                $done = !empty($in['done']);
+                run('UPDATE tasks SET done_at = ? WHERE id = ?', [$done ? ms() : null, $t['id']]);
+                audit($t['client_id'] !== null ? (int) $t['client_id'] : null, (int) $u['id'], 'task', ($done ? 'Zadatak završen: ' : 'Zadatak ponovno otvoren: ') . $t['title']);
+            }
+            out(['ok' => true]);
+        }
+
         case 'logout': {
             need_post();
             start_session();
@@ -335,6 +398,7 @@ try {
             $last2 = (int) (meta_get('imap_last_sync_2') ?? 0);
             $err2 = (string) (meta_get('imap_last_error_2') ?? '');
             $dc = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM documents');
+            $tasks = tasks_for($u);
             $templates = array_map('template_out', rows('SELECT * FROM templates ORDER BY sort_order, id'));
             $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE status IN ('pending', 'sending') OR (status = 'failed' AND send_at > ?) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
             $reminders = array_map('reminder_out', reminders_due($u));
@@ -344,7 +408,7 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
+            $rev = md5(json_encode([$tasks, $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -358,6 +422,7 @@ try {
                 'clients' => $clients,
                 'notes' => $notes,
                 'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails ORDER BY msg_date DESC, id DESC LIMIT 600')),
+                'tasks' => $tasks,
                 'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
                 'templates' => $templates,
@@ -412,6 +477,7 @@ try {
                 run('UPDATE emails SET client_id = ? WHERE id = ? AND client_id IS NULL', [$id, $mailId]);
                 sync_document_clients();
             }
+            audit($id, (int) $u['id'], 'create', 'Klijent kreiran, status: ' . (STAGE_LABELS[$status] ?? $status) . ($campA ? ', kampanja do ' . date('d.m.Y.', strtotime($campE)) . ' (' . number_format((float) $campV, 2, ',', '.') . ' €)' : ''), $name);
             out(['ok' => true, 'id' => (string) $id]);
         }
 
@@ -431,6 +497,7 @@ try {
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
                     [$c['id'], $u['id'], 'note', 'Nova kampanja: ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', vrijednost ' . number_format((float) $nv, 2, ',', '.') . ' €', $t]);
             });
+            audit((int) $c['id'], (int) $u['id'], 'campaign', 'Nova kampanja: ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', ' . number_format((float) $nv, 2, ',', '.') . ' €', (string) $c['name']);
             out(['ok' => true]);
         }
 
@@ -450,8 +517,10 @@ try {
             $fu = f_date($in['next_follow_up'] ?? '');
             run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
                 [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $owner, $fu, ms(), $c['id']]);
+            $newVals = ['kind' => $kind, 'name' => $name, 'contact' => $contact, 'oib' => $oib, 'email' => $email, 'phone' => $phone, 'service' => $service, 'value' => $value, 'owner_id' => $owner, 'next_follow_up' => $fu];
             if (array_key_exists('camp_active', $in)) {
                 [$campA, $campS, $campE, $campV] = f_campaign($in);
+                $newVals += ['camp_active' => $campA, 'camp_start' => $campS, 'camp_end' => $campE, 'camp_value' => $campV];
                 if ($campA === 0 && (int) $c['camp_active'] === 1) {
                     archive_campaign($c, (int) $u['id']); // kampanja je završena ili prekinuta: ostaje u povijesti
                 }
@@ -461,6 +530,10 @@ try {
                 }
             }
             link_emails_to_client((int) $c['id'], strtolower($email));
+            $diff = client_diff($c, $newVals);
+            if ($diff !== '') {
+                audit((int) $c['id'], (int) $u['id'], 'update', $diff, $name);
+            }
             out(['ok' => true]);
         }
 
@@ -476,8 +549,10 @@ try {
                 run('UPDATE emails SET client_id = NULL WHERE client_id = ?', [$c['id']]);
                 run('DELETE FROM notes WHERE client_id = ?', [$c['id']]);
                 run('DELETE FROM campaigns WHERE client_id = ?', [$c['id']]);
+                run('DELETE FROM tasks WHERE client_id = ?', [$c['id']]);
                 run('DELETE FROM clients WHERE id = ?', [$c['id']]);
             });
+            audit((int) $c['id'], (int) $u['id'], 'delete', 'Klijent obrisan (status: ' . (STAGE_LABELS[$c['status']] ?? $c['status']) . ', vrijednost ' . number_format((float) $c['value'], 2, ',', '.') . ' €)', (string) $c['name']);
             out(['ok' => true]);
         }
 
@@ -523,6 +598,7 @@ try {
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
                     [$c['id'], $u['id'], 'status', $label[$c['status']] . ' → ' . $label[$new] . "\n" . $text, $t]);
             });
+            audit((int) $c['id'], (int) $u['id'], 'status', 'Status: ' . $label[$c['status']] . ' → ' . $label[$new] . ' (' . $text . ')', (string) $c['name']);
             out(['ok' => true]);
         }
 
@@ -775,6 +851,7 @@ try {
             }
             $id = store_document((int) $c['id'], null, (string) $f['name'], (string) ($f['type'] ?? ''), $data, (int) $u['id']);
             run('UPDATE clients SET updated_at = ? WHERE id = ?', [ms(), $c['id']]);
+            audit((int) $c['id'], (int) $u['id'], 'doc', 'Dodan dokument: ' . (string) $f['name'], (string) $c['name']);
             out(['ok' => true, 'id' => (string) $id]);
         }
 
@@ -810,6 +887,9 @@ try {
                 throw new ApiError('Dokument može obrisati administrator, onaj tko ga je učitao ili prodavač klijenta.', 403);
             }
             delete_document_rows([$d]);
+            if ($d['client_id'] !== null) {
+                audit((int) $d['client_id'], (int) $u['id'], 'doc', 'Obrisan dokument: ' . (string) $d['filename']);
+            }
             out(['ok' => true]);
         }
 
