@@ -70,6 +70,24 @@ function need_admin(array $u): void
 
 /* ---------- output shapes ---------- */
 
+/** @return array{0:int,1:?string,2:?string} camp_active, camp_start, camp_end from the request */
+function f_campaign(array $in): array
+{
+    $active = !empty($in['camp_active']);
+    if (!$active) {
+        return [0, null, null];
+    }
+    $end = f_date($in['camp_end'] ?? '');
+    if ($end === null) {
+        throw new ApiError('Za aktivnog klijenta odaberite točan datum do kada je kampanja aktivna.');
+    }
+    $start = f_date($in['camp_start'] ?? '') ?? date('Y-m-d');
+    if ($start > $end) {
+        throw new ApiError('Početak kampanje ne može biti nakon datuma završetka.');
+    }
+    return [1, $start, $end];
+}
+
 function client_out(array $r): array
 {
     return [
@@ -85,6 +103,9 @@ function client_out(array $r): array
         'status' => (string) $r['status'],
         'ownerId' => $r['owner_id'] !== null ? (string) $r['owner_id'] : null,
         'nextFollowUp' => $r['next_follow_up'] ? (string) $r['next_follow_up'] : '',
+        'campActive' => (int) ($r['camp_active'] ?? 0) === 1,
+        'campStart' => !empty($r['camp_start']) ? (string) $r['camp_start'] : '',
+        'campEnd' => !empty($r['camp_end']) ? (string) $r['camp_end'] : '',
         'createdAt' => (int) $r['created_at'],
         'updatedAt' => (int) $r['updated_at'],
         'wonAt' => $r['won_at'] !== null ? (int) $r['won_at'] : null,
@@ -337,13 +358,14 @@ try {
             $status = f_status($in['status'] ?? 'novi');
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
             $fu = f_date($in['next_follow_up'] ?? '');
+            [$campA, $campS, $campE] = f_campaign($in);
             $note = f_text($in, 'note', 'Prva bilješka');
             $mailId = !empty($in['email_id']) ? (int) load_email((string) $in['email_id'])['id'] : null;
             $t = ms();
-            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $note, $t, $u): int {
-                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t]);
+            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $note, $t, $u, $campA, $campS, $campE): int {
+                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE]);
                 $cid = insert_id();
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
                 return $cid;
@@ -372,6 +394,10 @@ try {
             $fu = f_date($in['next_follow_up'] ?? '');
             run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
                 [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $owner, $fu, ms(), $c['id']]);
+            if (array_key_exists('camp_active', $in)) {
+                [$campA, $campS, $campE] = f_campaign($in);
+                run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ? WHERE id = ?', [$campA, $campS, $campE, $c['id']]);
+            }
             link_emails_to_client((int) $c['id'], strtolower($email));
             out(['ok' => true]);
         }

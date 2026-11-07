@@ -52,6 +52,7 @@ $v = static function (string $f): string {
     <nav class="tabs" role="tablist" aria-label="Odjeljci">
       <button class="tab" role="tab" data-tab="pregled" id="t-pregled">Pregled</button>
       <button class="tab" role="tab" data-tab="klijenti" id="t-klijenti">Klijenti</button>
+      <button class="tab" role="tab" data-tab="aktivni" id="t-aktivni">Aktivni klijenti</button>
       <button class="tab" role="tab" data-tab="inbox" id="t-inbox">Inbox <span class="badge" id="inboxBadge" hidden></span></button>
       <button class="tab" role="tab" data-tab="tim" id="t-tim">Tim</button>
       <button class="tab" role="tab" data-tab="postavke" id="t-postavke">Postavke</button>
@@ -101,6 +102,7 @@ $v = static function (string $f): string {
     <div class="clist" id="ilist"></div>
   </section>
 
+  <section class="view" id="v-aktivni" role="tabpanel" aria-labelledby="t-aktivni" hidden></section>
   <section class="view" id="v-tim" role="tabpanel" aria-labelledby="t-tim" hidden></section>
   <section class="view" id="v-postavke" role="tabpanel" aria-labelledby="t-postavke" hidden></section>
 </main>
@@ -137,6 +139,8 @@ $v = static function (string $f): string {
         <label class="f">Status<select id="nStatus"></select></label>
         <label class="f">Prodavač<select id="nOwner"></select></label>
         <label class="f">Sljedeći kontakt<input id="nFollow" type="date"></label>
+        <div class="f wide campbox"><label class="chk"><input type="checkbox" id="nCamp"> Aktivni: klijent ima aktivnu kampanju</label>
+          <div class="grid2" id="nCampDates" hidden><label class="f">Kampanja od<input id="nCampStart" type="date"></label><label class="f">Aktivna do <span class="req">*</span><input id="nCampEnd" type="date"></label></div></div>
         <label class="f wide"><span>Prva bilješka <span class="req">* obavezno</span></span>
           <textarea id="nNote" placeholder="Kako je kontakt nastao, što klijent traži, što je dogovoreno."></textarea></label>
       </div>
