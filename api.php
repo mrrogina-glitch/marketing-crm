@@ -90,16 +90,6 @@ function f_campaign(array $in): array
     return [1, $start, $end, f_value($in['camp_value'])];
 }
 
-/** Moves the client's current campaign into the history (if it has dates). */
-function archive_campaign(array $c, int $userId): void
-{
-    if (empty($c['camp_end'])) {
-        return;
-    }
-    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms()]);
-}
-
 function client_out(array $r): array
 {
     return [
@@ -304,6 +294,7 @@ try {
 
         case 'bootstrap': {
             $u = need_user();
+            expire_campaigns();
             $a = row('SELECT COUNT(*) AS c, COALESCE(MAX(updated_at), 0) AS m, COALESCE(SUM(value), 0) AS s FROM clients');
             $cg = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM campaigns');
             $b = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM notes');
@@ -374,6 +365,9 @@ try {
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
             $fu = f_date($in['next_follow_up'] ?? '');
             [$campA, $campS, $campE, $campV] = f_campaign($in);
+            if ($campA === 1) {
+                $status = 'aktivni';
+            }
             $note = f_text($in, 'note', 'Prva bilješka');
             $mailId = !empty($in['email_id']) ? (int) load_email((string) $in['email_id'])['id'] : null;
             $t = ms();
@@ -405,6 +399,7 @@ try {
             transaction(static function () use ($c, $u, $ns, $ne, $nv, $t): void {
                 archive_campaign($c, (int) $u['id']);
                 run('UPDATE clients SET camp_active = 1, camp_start = ?, camp_end = ?, camp_value = ?, updated_at = ? WHERE id = ?', [$ns, $ne, $nv, $t, $c['id']]);
+                mark_client_active($c, (int) $u['id'], $t);
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
                     [$c['id'], $u['id'], 'note', 'Nova kampanja: ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', vrijednost ' . number_format((float) $nv, 2, ',', '.') . ' €', $t]);
             });
@@ -433,6 +428,9 @@ try {
                     archive_campaign($c, (int) $u['id']); // kampanja je završena ili prekinuta: ostaje u povijesti
                 }
                 run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $c['id']]);
+                if ($campA === 1) {
+                    mark_client_active($c, (int) $u['id'], ms());
+                }
             }
             link_emails_to_client((int) $c['id'], strtolower($email));
             out(['ok' => true]);
@@ -487,7 +485,7 @@ try {
                 throw new ApiError('Status je već postavljen.');
             }
             $t = ms();
-            $label = ['novi' => 'Novi kontakt', 'kontaktiran' => 'Kontaktiran', 'ponuda' => 'Ponuda poslana', 'pregovori' => 'Pregovori', 'dobiven' => 'Dobiven', 'izgubljen' => 'Izgubljen'];
+            $label = ['novi' => 'Novi kontakt', 'kontaktiran' => 'Kontaktiran', 'ponuda' => 'Ponuda poslana', 'pregovori' => 'Pregovori', 'aktivni' => 'Aktivni', 'dobiven' => 'Dobiven', 'izgubljen' => 'Izgubljen'];
             transaction(static function () use ($c, $u, $new, $text, $t, $label): void {
                 run('UPDATE clients SET status = ?, won_at = ?, updated_at = ? WHERE id = ?',
                     [$new, $new === 'dobiven' ? $t : $c['won_at'], $t, $c['id']]);
