@@ -1,0 +1,14 @@
+Options -Indexes
+DirectoryIndex index.php
+
+# Samo HTTPS
+RewriteEngine On
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Osjetljive datoteke i mape nisu dostupne preko weba
+RewriteRule ^(lib|\.git)(/|$) - [R=404,L]
+<FilesMatch "^(config\.php|config\.sample\.php|cron\.php|\.gitignore|README\.md)$">
+    Require all denied
+</FilesMatch>
