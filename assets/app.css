@@ -551,3 +551,23 @@ body.auth{background:radial-gradient(900px 500px at 15% 10%,color-mix(in srgb,va
 .auth-logo img{display:block;width:100%;max-width:300px;height:auto}
 .authname{font-size:22px;font-weight:750;margin-top:8px}
 @media (max-width:480px){.auth-box{padding:0 22px 28px}.auth-logo{margin:0 -22px 4px;padding:28px 28px 22px}}
+
+/* obavijesti, alati, dupli klijenti */
+.alrow{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--line)}
+.alrow .a{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 320px}
+.alrow .a small{color:var(--muted);line-height:1.45}
+.alrow .acts{display:flex;gap:6px;flex-wrap:wrap}
+#clTools{display:flex;gap:6px;margin-left:auto;align-self:flex-end}
+.sheet.wide{max-width:860px;width:calc(100% - 24px)}
+#toolModal .sh-b{display:block;max-height:70vh;overflow:auto;padding:4px 20px 20px}
+#toolModal .sh-b>*{flex-shrink:0}
+#toolModal .tscroll{overflow:auto}
+.dupgrp{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:10px 0}
+.dupgrp .dh{font-size:12.5px;font-weight:650;color:var(--warn);margin-bottom:6px}
+.dupc{display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start;padding:6px 4px;cursor:pointer}
+.dupc input{width:18px;height:18px;margin:2px 0 0;padding:0}
+.dupc small{display:block;color:var(--muted);line-height:1.4}
+.dupgrp .acts{display:flex;gap:6px;margin-top:8px}
+.impstrip{margin:8px 0 12px}
+#toolModal h4{margin:14px 0 6px}
+#toolModal .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:12px}

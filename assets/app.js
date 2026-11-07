@@ -6,18 +6,47 @@ if (document.body.dataset.view === 'login') { initLogin(); } else { initApp(); }
 
 /* ------------------------------------------------------------------ login */
 function initLogin() {
+  const post = async (a, body) => {
+    const r = await fetch('api.php?a=' + a, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Prijava nije uspjela.');
+    return d;
+  };
+  const showCode = (masked) => {
+    const f = $('fLogin');
+    f.innerHTML = '<p class="muted">Poslali smo 6-znamenkasti kod na <b>' + masked.replace(/[<>&]/g, '') + '</b>. Kod vrijedi 10 minuta.</p>' +
+      '<label class="f">Kod za potvrdu<input id="lCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]*" required autofocus></label>' +
+      '<label class="chk"><input type="checkbox" id="lRemember"> Zapamti ovaj uređaj 30 dana</label>' +
+      '<div class="msg" id="lMsg" role="alert"></div>' +
+      '<button class="btn primary" type="submit" id="lGo">Potvrdi</button>' +
+      '<div class="row-btns" style="margin-top:8px"><button class="btn" type="button" id="lResend">Pošalji kod ponovno</button><button class="btn" type="button" id="lBack">Natrag</button></div>';
+    f.dataset.step = 'code';
+    $('lCode').focus();
+    $('lBack').addEventListener('click', () => location.reload());
+    $('lResend').addEventListener('click', async () => {
+      $('lMsg').textContent = '';
+      try { await post('login_resend', {}); $('lMsg').textContent = 'Novi kod je poslan.'; } catch (e) { $('lMsg').textContent = e.message; }
+    });
+  };
   $('fLogin').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const msg = $('lMsg');
     msg.textContent = '';
+    if ($('fLogin').dataset.step === 'code') {
+      const code = $('lCode').value.replace(/\D/g, '');
+      if (code.length !== 6) { msg.textContent = 'Upišite 6-znamenkasti kod.'; return; }
+      $('lGo').disabled = true;
+      try { await post('login_verify', { code, remember: $('lRemember').checked }); location.reload(); }
+      catch (e) { msg.textContent = e.message; $('lGo').disabled = false; if (/Prijavite se ponovno|blokirana/.test(e.message)) setTimeout(() => location.reload(), 2500); }
+      return;
+    }
     const email = $('lEmail').value.trim();
     const password = $('lPass').value;
     if (!email || !password) { msg.textContent = 'Upišite e-mail i lozinku.'; return; }
     $('lGo').disabled = true;
     try {
-      const r = await fetch('api.php?a=login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Prijava nije uspjela.');
+      const d = await post('login', { email, password });
+      if (d.twofa) { showCode(d.email || ''); return; }
       location.reload();
     } catch (e) {
       msg.textContent = e.message;
@@ -111,7 +140,7 @@ function initApp() {
       S.csrf = d.csrf || S.csrf;
       if (S.offline) { S.offline = false; renderBanner(); }
       if (d.unchanged) return;
-      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.approvals = d.approvals || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.settings = d.settings || null;
+      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.approvals = d.approvals || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.alerts = d.alerts || []; S.dnc = d.dnc || []; S.settings = d.settings || null;
       S.loaded = true;
       derive();
       renderAll(); updateDrawer();
@@ -366,6 +395,7 @@ function initApp() {
           '<span class="acts"><button class="btn sm" data-act="remfollow" data-cid="' + esc(c.id) + '">Pošalji podsjetnik</button><button class="btn sm" data-act="remsnooze" data-id="' + esc(r.id) + '">Odgodi 2 dana</button><button class="btn sm" data-act="remdone" data-id="' + esc(r.id) + '">Odbaci</button></span></li>';
       }).join('') + '</ul></section>';
     }
+    h += alertsPanel();
     h += tasksPanel();
     h += '<div class="strip">' +
       '<div><div class="k">Otvoreni klijenti</div><div class="v">' + open.length + '</div><div class="s">u radu, ' + eur(sumVal(open)) + '</div></div>' +
@@ -471,6 +501,7 @@ function initApp() {
     return a;
   }
   function renderClients() {
+    clientTools();
     fillSelect($('fStatus'), [['', 'Svi statusi']].concat(STAGES.map((s) => [s.id, s.label])), S.fStatus);
     fillSelect($('fOwner'), ownerOptions(['', 'Svi prodavači']), S.fOwner);
     const box = $('clist');
@@ -625,6 +656,187 @@ function initApp() {
     if (isAdmin()) { renderAudit(); loadAudit(); }
   }
 
+  /* ---------- obavijesti, sigurnost, ne kontaktirati, duplikati, uvoz ---------- */
+  const dncHas = (e) => !!e && (S.dnc || []).includes(String(e).toLowerCase());
+  const ALERT_ICON = { camp_end: '🔔', security: '🛡️', unsub: '✉️' };
+  function alertsPanel() {
+    const al = S.alerts || [];
+    if (!al.length) return '';
+    return '<section class="panel-b" id="alertsPanel"><header><h3>Obavijesti</h3><span class="muted">' + al.length + ' ' + (al.length === 1 ? 'nova' : 'novih') + '</span></header><ul class="list">' + al.map((a) => {
+      const c = a.clientId ? byId(a.clientId) : null;
+      return '<li class="alrow"><div class="a"><b>' + (ALERT_ICON[a.kind] || '⏰') + ' ' + esc(a.title) + '</b><small>' + esc(a.body).replace(/\n/g, '<br>') + '</small></div><span class="acts">' +
+        (c ? '<button class="btn sm" data-open="' + esc(c.id) + '">Otvori klijenta</button>' : '') +
+        (a.kind === 'camp_end' && a.data ? '<button class="btn sm primary" data-act="alrenew" data-id="' + esc(a.id) + '">Obnovi kampanju</button>' : '') +
+        (a.kind === 'security' && isAdmin() ? '<button class="btn sm" data-goto="postavke">Sigurnost</button>' : '') +
+        '<button class="btn sm" data-act="aldone" data-id="' + esc(a.id) + '">Riješeno</button></span></li>';
+    }).join('') + '</ul></section>';
+  }
+  async function alertDone(id) {
+    const ok = await safe(() => call('alert_done', { id }));
+    if (ok) { S.alerts = (S.alerts || []).filter((a) => a.id !== id); renderOverview(); }
+  }
+  async function alertRenew(id) {
+    const a = (S.alerts || []).find((x) => x.id === id); if (!a || !a.data) return;
+    const d = a.data;
+    if (!confirm('Upisati novu kampanju za ' + (byId(a.clientId) || {}).name + '?\n\nOd ' + fmtYmd(d.start) + ' do ' + fmtYmd(d.end) + ' (' + d.days + ' dana), vrijednost ' + d.value + ' €.\n\nDatume i iznos kasnije možete izmijeniti u kartici klijenta.')) return;
+    const ok = await safe(() => call('campaign_renew', { client_id: a.clientId, start: d.start, end: d.end, value: d.value }), 'Nova kampanja upisana');
+    if (ok) { await safe(() => call('alert_done', { id })); await refresh(true); renderOverview(); }
+  }
+
+  /* sigurnost */
+  function secHtml() {
+    const s = S.sec;
+    let h = '<header><h3>Sigurnost prijave</h3><span class="muted">dva koraka i blokada IP adresa</span></header><div class="pad">' +
+      '<p class="hint">Nakon unosa lozinke šalje se 6-znamenkasti kod na e-mail korisnika. Nakon 5 uzastopnih pogrešnih prijava IP adresa se blokira na 24 sata, a isto vrijedi za pokušaje probijanja prijave (administratori dobivaju obavijest). Lozinku korisnika resetirate u tablici Korisnici.</p>';
+    if (!s) return h + '<p class="muted">Učitavanje…</p></div>';
+    h += '<label class="chk"><input type="checkbox" id="secTwofa"' + (s.twofa ? ' checked' : '') + '> Prijava u dva koraka (kod e-mailom) za sve korisnike</label>' +
+      (!s.mailOk ? '<p class="hint">E-mail nije podešen pa se dva koraka ne mogu primijeniti.</p>' : '') +
+      '<label class="chk"><input type="checkbox" id="secRevoke"> Poništi sve zapamćene uređaje (' + s.trusted + ')</label>' +
+      '<div class="row-btns start"><button class="btn primary" data-act="secsave">Spremi</button></div>' +
+      '<h4 style="margin:16px 0 6px">Blokirane IP adrese</h4>' +
+      (s.blocks.length ? '<table class="tbl"><thead><tr><th>IP adresa</th><th>Razlog</th><th>Blokirano do</th><th></th></tr></thead><tbody>' + s.blocks.map((b) => '<tr><td>' + esc(b.ip) + '</td><td>' + esc(b.reason) + '</td><td>' + esc(new Date(b.until).toLocaleString('hr-HR')) + '</td><td><button class="btn sm" data-act="ipunblock" data-ip="' + esc(b.ip) + '">Odblokiraj</button></td></tr>').join('') + '</tbody></table>' : '<p class="muted">Nema blokiranih adresa.</p>') +
+      '<div class="msg" id="secMsg" role="alert"></div></div>';
+    return h;
+  }
+  async function loadSecurity() {
+    try { S.sec = await call('security_overview', null, 'GET'); } catch (e) { return; }
+    const p = $('secPanel'); if (p) p.innerHTML = secHtml();
+  }
+  async function secSave() {
+    const ok = await safe(() => call('security_save', { twofa: $('secTwofa').checked, revoke_trusted: $('secRevoke').checked }), 'Postavke sigurnosti spremljene');
+    if (ok) loadSecurity();
+  }
+  async function ipUnblock(ip) {
+    if (!confirm('Odblokirati IP adresu ' + ip + '?')) return;
+    const ok = await safe(() => call('ip_unblock', { ip }), 'IP adresa odblokirana');
+    if (ok) loadSecurity();
+  }
+
+  /* ne kontaktirati */
+  const DNC_SRC = { link: 'odjava putem poveznice', manual: 'ručno', import: 'uvoz' };
+  function renderDnc() {
+    const p = $('dncPanel'); if (!p) return;
+    const l = S.dncList;
+    p.innerHTML = '<header><h3>Ne kontaktirati</h3><span class="muted">odjavljeni i ručno dodani · izuzeti iz grupnih poruka i kampanja</span></header><div class="pad">' +
+      '<div class="row"><label class="f">E-mail adresa<input id="dncEmail" type="email" placeholder="ime@tvrtka.hr" autocomplete="off"></label><label class="f">Razlog<input id="dncReason" placeholder="npr. klijent je tražio da ga ne kontaktiramo"></label><button class="btn" data-act="dncadd">Dodaj</button></div>' +
+      '<div class="msg" id="dncMsg" role="alert"></div>' +
+      (!l ? '<p class="muted">Učitavanje…</p>' : (l.length ? '<div class="tscroll"><table class="tbl"><thead><tr><th>E-mail</th><th>Klijent</th><th>Razlog</th><th>Izvor</th><th>Datum</th><th></th></tr></thead><tbody>' + l.map((x) => { const c = x.client ? byId(x.client) : null; return '<tr><td>' + esc(x.email) + '</td><td>' + (c ? '<button class="li" data-open="' + esc(c.id) + '">' + esc(c.name) + '</button>' : '') + '</td><td>' + esc(x.reason) + '</td><td>' + esc(DNC_SRC[x.source] || x.source) + '</td><td>' + esc(fmtDate(x.at)) + '</td><td>' + (isAdmin() ? '<button class="btn sm" data-act="dncrm" data-id="' + esc(x.id) + '">Ukloni</button>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="muted">Popis je prazan. Klijenti se na njega dodaju kad se odjave putem poveznice u e-mailu.</p>')) + '</div>';
+  }
+  async function loadDnc() {
+    try { S.dncList = (await call('dnc_list', null, 'GET')).list; } catch (e) { return; }
+    renderDnc();
+  }
+  async function dncAdd() {
+    const email = $('dncEmail').value.trim();
+    if (!email) { $('dncMsg').textContent = 'Upišite e-mail adresu.'; return; }
+    const ok = await safe(() => call('dnc_add', { email, reason: $('dncReason').value.trim() }), 'Dodano na popis');
+    if (ok) { await refresh(true); loadDnc(); } else { $('dncMsg').textContent = ''; }
+  }
+  async function dncRemove(id) {
+    if (!confirm('Ukloniti adresu s popisa? Ponovno će primati grupne poruke.')) return;
+    const ok = await safe(() => call('dnc_remove', { id }), 'Uklonjeno s popisa');
+    if (ok) { await refresh(true); loadDnc(); }
+  }
+  function dncBanner(c) {
+    if (!c.email) return '';
+    if (dncHas(c.email)) return '<div class="banner" role="status">Ne kontaktirati: adresa ' + esc(c.email) + ' je na popisu (odjava ili zahtjev klijenta). Grupne poruke se ne šalju.</div>';
+    return '';
+  }
+  async function dncClient(id) {
+    const c = byId(id); if (!c || !c.email) return;
+    if (!confirm('Dodati ' + c.email + ' na popis "ne kontaktirati"?')) return;
+    const ok = await safe(() => call('dnc_add', { email: c.email, reason: 'Označeno na kartici klijenta' }), 'Dodano na popis');
+    if (ok) { await refresh(true); openClient(id, true); }
+  }
+
+  /* alati (duplikati, uvoz) */
+  function toolModal(title, html) {
+    const m = $('toolModal'); m.querySelector('h2').textContent = title; m.querySelector('.sh-b').innerHTML = html; m.hidden = false;
+    document.body.classList.add('lock');
+  }
+  function toolClose() { $('toolModal').hidden = true; if ($('drawer').hidden && $('mdrawer').hidden) document.body.classList.remove('lock'); }
+  const REASON = { 'OIB': 'isti OIB', 'e-mail': 'ista e-mail adresa', 'telefon': 'isti telefon', 'naziv': 'sličan naziv' };
+  async function dupOpen() {
+    toolModal('Duplikati klijenata', '<p class="muted">Tražim duplikate…</p>');
+    let d; try { d = await call('dup_scan', null, 'GET'); } catch (e) { toolModal('Duplikati klijenata', '<p class="msg">' + esc(e.message) + '</p>'); return; }
+    S.dupData = d; dupRender();
+  }
+  function dupRender() {
+    const d = S.dupData;
+    if (!d.groups.length) { toolModal('Duplikati klijenata', '<p>Nema pronađenih duplikata.</p>'); return; }
+    toolModal('Duplikati klijenata', '<p class="hint">Pronađeno skupina: <b>' + d.total + '</b> (prikazano ' + d.groups.length + '). Odaberite klijenta kojeg želite zadržati; bilješke, zadaci, e-mailovi i dokumenti ostalih prebacuju se na njega, a ostali se brišu.</p>' +
+      d.groups.map((g, gi) => '<div class="dupgrp" data-gi="' + gi + '"><div class="dh">Podudaranje: ' + g.reasons.map((r) => esc(REASON[r] || r)).join(', ') + '</div>' + g.clients.map((c, ci) =>
+        '<label class="dupc"><input type="radio" name="keep' + gi + '" value="' + esc(c.id) + '"' + (ci === 0 ? ' checked' : '') + '><span><b>' + esc(c.name) + '</b><small>' + esc([c.oib && 'OIB ' + c.oib, c.email, c.phone, STAGES.find((x) => x.id === c.status).label, 'prodavač ' + c.owner].filter(Boolean).join(' · ')) + '<br>' + c.notes + ' bilješki, ' + c.emails + ' e-mailova, ' + c.docs + ' dokumenata</small></span></label>').join('') +
+        '<div class="acts"><button class="btn sm primary" data-tool="merge" data-gi="' + gi + '">Spoji u odabranog</button><button class="btn sm" data-tool="ignore" data-gi="' + gi + '">Nisu duplikati</button></div></div>').join(''));
+  }
+  async function dupMerge(gi) {
+    const g = S.dupData.groups[gi]; const keep = document.querySelector('input[name=keep' + gi + ']:checked').value;
+    const rm = g.clients.map((c) => c.id).filter((i) => i !== keep);
+    const kc = g.clients.find((c) => c.id === keep);
+    if (!confirm('Zadržati "' + kc.name + '" i spojiti ' + rm.length + ' ' + (rm.length === 1 ? 'klijenta' : 'klijenata') + ' u njega?\n\nOvo se ne može poništiti.')) return;
+    const ok = await safe(() => call('client_merge', { keep, remove: rm }), 'Klijenti spojeni');
+    if (ok) { await refresh(true); S.dupData.groups.splice(gi, 1); S.dupData.total--; dupRender(); }
+  }
+  async function dupIgnore(gi) {
+    const g = S.dupData.groups[gi];
+    const ok = await safe(() => call('dup_ignore', { ids: g.clients.map((c) => c.id) }), 'Skupina označena kao različiti klijenti');
+    if (ok) { S.dupData.groups.splice(gi, 1); S.dupData.total--; dupRender(); }
+  }
+  function impOpen() {
+    S.imp = null;
+    toolModal('Uvoz klijenata iz Excela', '<p class="hint">Učitajte datoteku <b>.xlsx</b> ili <b>.csv</b>. Prvi redak mora sadržavati zaglavlja, npr. <i>Naziv, Kontakt osoba, OIB, E-mail, Telefon, Usluga, Vrijednost, Status, Napomena</i> (obavezan je samo naziv). Prije uvoza vidjet ćete provjeru: greške i duplikate.</p>' +
+      '<label class="f">Datoteka<input type="file" id="impFile" accept=".xlsx,.csv,.txt"></label><div class="msg" id="impMsg" role="alert"></div><div class="acts"><button class="btn primary" data-tool="impcheck">Provjeri datoteku</button></div>');
+  }
+  async function impCheck() {
+    const f = $('impFile').files[0]; const m = $('impMsg');
+    if (!f) { m.textContent = 'Odaberite datoteku.'; return; }
+    m.textContent = 'Provjera…';
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await fetch('api.php?a=import_preview', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF': S.csrf }, body: fd });
+      const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Provjera nije uspjela.');
+      S.imp = d; impPreview();
+    } catch (e) { m.textContent = e.message; }
+  }
+  function impPreview() {
+    const d = S.imp;
+    const tbl = (rows, cols) => rows.length ? '<div class="tscroll" style="max-height:200px"><table class="tbl"><thead><tr><th>Redak</th><th>Naziv</th><th>E-mail</th><th>' + cols + '</th></tr></thead><tbody>' + rows.map((r) => '<tr><td>' + r.row + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.email) + '</td><td>' + (r.errors.length ? esc(r.errors.join(', ')) : (r.dup ? 'već postoji: ' + esc(r.dup.name) + ' (' + esc(r.dup.where) + ', ' + esc(r.dup.type) + ')' : '')) + '</td></tr>').join('') + '</tbody></table></div>' : '';
+    toolModal('Uvoz klijenata iz Excela', '<p><b>' + esc(d.file) + '</b>: ' + d.total + ' redaka. Prepoznati stupci: ' + d.columns.map((c) => esc(c[1])).join(', ') + '.</p>' +
+      '<div class="strip impstrip"><div><div class="k">Spremno za uvoz</div><div class="v">' + d.ok + '</div></div><div><div class="k">Duplikati</div><div class="v' + (d.dup ? ' warn' : '') + '">' + d.dup + '</div></div><div><div class="k">S greškom</div><div class="v' + (d.bad ? ' warn' : '') + '">' + d.bad + '</div></div></div>' +
+      (d.bad ? '<h4>Redci s greškom (preskaču se)</h4>' + tbl(d.badRows, 'Greška') : '') + (d.dup ? '<h4>Duplikati</h4>' + tbl(d.dupRows, 'Postojeći klijent') : '') + (d.ok ? '<h4>Primjer redaka za uvoz</h4>' + tbl(d.okRows, '') : '') +
+      '<div class="row"><label class="f">Dodijeli prodavaču<select id="impOwner">' + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === S.me.id ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select></label>' +
+      '<label class="f">Duplikati<select id="impMode"><option value="skip">Preskoči duplikate (preporučeno)</option><option value="all">Uvezi i duplikate</option></select></label></div>' +
+      '<div class="msg" id="impMsg" role="alert"></div><div class="acts"><button class="btn primary" data-tool="impgo"' + (d.ok + d.dup ? '' : ' disabled') + '>Uvezi klijente</button><button class="btn" data-tool="impopen">Druga datoteka</button></div>');
+  }
+  async function impGo() {
+    const d = S.imp; const mode = $('impMode').value;
+    const n = mode === 'all' ? d.ok + d.dup : d.ok;
+    if (!confirm('Uvesti ' + n + ' klijenata?')) return;
+    try {
+      const r = await call('import_commit', { token: d.token, mode, owner_id: $('impOwner').value });
+      await refresh(true);
+      toolModal('Uvoz završen', '<p>Uvezeno klijenata: <b>' + r.created + '</b>. Preskočeno duplikata: ' + r.skippedDup + '. Redaka s greškom: ' + r.skippedBad + '.</p><div class="acts"><button class="btn primary" data-tool="close">Zatvori</button></div>');
+    } catch (e) { $('impMsg').textContent = e.message; }
+  }
+  function toolClick(ev) {
+    const b = ev.target.closest('[data-tool]');
+    if (b) {
+      const t = b.dataset.tool;
+      if (t === 'close') toolClose();
+      else if (t === 'merge') dupMerge(+b.dataset.gi);
+      else if (t === 'ignore') dupIgnore(+b.dataset.gi);
+      else if (t === 'impcheck') impCheck();
+      else if (t === 'impgo') impGo();
+      else if (t === 'impopen') impOpen();
+      return;
+    }
+    if (ev.target.classList && ev.target.classList.contains('overlay')) toolClose();
+  }
+  function clientTools() {
+    const el = $('clTools'); if (!el) return;
+    el.innerHTML = isAdmin() ? '<button class="btn sm" data-act="impopen">Uvoz iz Excela</button><button class="btn sm" data-act="dupopen">Duplikati</button>' : '';
+  }
+
   /* ---------- settings ---------- */
   function bkHtml() {
     const b = S.backups;
@@ -667,6 +879,7 @@ function initApp() {
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
         '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
+      h += '<section class="panel-b" id="secPanel">' + secHtml() + '</section>';
       h += '<section class="panel-b" id="bkPanel">' + bkHtml() + '</section>';
       const ic = S.mail.imap2Cfg || { host: '', port: 993, secure: 'ssl', user: '', folder: 'INBOX', hasPass: false, source: '' };
       h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (samo primanje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
@@ -703,7 +916,7 @@ function initApp() {
         '<div class="msg" id="uMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="ucreate">Dodaj korisnika</button></div></div></section>';
     }
     root.innerHTML = h;
-    if (isAdmin()) loadBackups();
+    if (isAdmin()) { loadBackups(); loadSecurity(); }
   }
   function defaultSigGuess() { return [S.me.name, S.mail.from].filter(Boolean).join('\n'); }
   async function sigSave() {
@@ -871,6 +1084,7 @@ function initApp() {
     const campHist = (S.campaigns || []).filter((x) => x.clientId === c.id);
     const ownerOpts = ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === c.ownerId ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
     let h = '<div class="sh-h"><div><h2 id="dTitle"></h2><div class="sub"><span id="dPill"></span><span id="dSub"></span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">' +
+      dncBanner(c) +
       '<div class="sec"><div class="acts"><label class="f">Status<select id="stSel">' + STAGES.map((s) => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('') + '</select></label><button class="btn" data-act="mail">Napiši e-mail</button>' + (String(c.ownerId) !== String(S.me.id) ? '<button class="btn" data-act="take">Preuzmi klijenta</button>' : '') + '</div>' +
       '<div class="pending" id="stPending" hidden><p id="stLabel"></p><textarea id="stText" placeholder="Razlog promjene ili što je dogovoreno (obavezno)"></textarea><div class="msg" id="stMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="stok">Potvrdi promjenu</button><button class="btn sm" data-act="stno">Odustani</button></div></div></div>' +
       '<div class="sec"><h3>Nova bilješka <span class="req" style="font-size:12px">obavezno</span></h3><div class="compose"><div class="row"><label class="f">Vrsta<select id="noteType"><option value="note">Bilješka</option><option value="call">Poziv</option><option value="meeting">Sastanak</option></select></label>' +
@@ -939,6 +1153,7 @@ function initApp() {
     if (S.lastFocus && S.lastFocus.focus && document.contains(S.lastFocus)) S.lastFocus.focus();
   }
   function closeTop() {
+    if ($('toolModal') && !$('toolModal').hidden) { $('toolModal').hidden = true; return; }
     if (!$('mMail').hidden) { $('mMail').hidden = true; return; }
     if (!$('mNew').hidden) { $('mNew').hidden = true; if ($('drawer').hidden && $('mdrawer').hidden) document.body.classList.remove('lock'); return; }
     if (!$('mdrawer').hidden) { $('mdrawer').hidden = true; S.openMailId = null; if ($('drawer').hidden) document.body.classList.remove('lock'); return; }
@@ -1083,11 +1298,11 @@ function initApp() {
         '<div class="spell" id="mcSpell" aria-live="polite"></div>' +
         '<div class="foot"><span class="msg" id="mcMsg" role="alert"></span><button class="btn" data-mc="spell">Provjeri pravopis</button><button class="btn primary" data-mc="send" id="mcSend">Pošalji</button></div>' +
         '</div></section>' +
-        '<section class="panel-b" id="mcApprove" hidden></section><section class="panel-b" id="mcQueue"></section><section class="panel-b" id="mcStats"></section>';
+        '<section class="panel-b" id="mcApprove" hidden></section><section class="panel-b" id="mcQueue"></section><section class="panel-b" id="mcStats"></section><section class="panel-b" id="dncPanel"></section>';
       root.addEventListener('click', mcClick); $('mcModal').addEventListener('click', mcClick); root.addEventListener('change', mcChange); root.addEventListener('input', mcInput);
       mcMode(M.mode); Object.keys(M.stat).forEach((k) => { const i = root.querySelector('input[data-mc=stat][value=' + k + ']'); if (i) i.checked = !!M.stat[k]; });
     }
-    renderMcQueue(); renderMcStats(); loadMcOverview();
+    renderMcQueue(); renderMcStats(); loadMcOverview(); renderDnc(); loadDnc();
   }
   const mcLim = () => { const o = mcState().ov; return { n: o ? o.perHour : 45, w: o ? 'od ' + o.window.replace('–', ' do ') : 'od 02:00 do 19:00' }; };
   function mcHintText() {
@@ -1430,6 +1645,15 @@ function initApp() {
       else if (act === 'ucreate') userCreate();
       else if (act === 'mailtest') mailTest();
       else if (act === 'bkrun') runBackup();
+      else if (act === 'secsave') secSave();
+      else if (act === 'ipunblock') ipUnblock(a.dataset.ip);
+      else if (act === 'aldone') alertDone(a.dataset.id);
+      else if (act === 'alrenew') alertRenew(a.dataset.id);
+      else if (act === 'dncadd') dncAdd();
+      else if (act === 'dncrm') dncRemove(a.dataset.id);
+      else if (act === 'dnccl') dncClient(a.dataset.id);
+      else if (act === 'dupopen') dupOpen();
+      else if (act === 'impopen') impOpen();
       return;
     }
     if (t.classList && t.classList.contains('overlay')) closeTop();
@@ -1458,7 +1682,8 @@ function initApp() {
     if (ev.target.id === 'fq') { S.q = ev.target.value; renderClients(); }
     else if (ev.target.id === 'iq') { S.iq = ev.target.value; renderInbox(); }
   });
-  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && (!$('drawer').hidden || !$('mdrawer').hidden || !$('mNew').hidden || !$('mMail').hidden)) closeTop(); });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && (!$('drawer').hidden || !$('mdrawer').hidden || !$('mNew').hidden || !$('mMail').hidden || !$('toolModal').hidden)) closeTop(); });
+  $('toolModal').addEventListener('click', toolClick);
   $('fNew').addEventListener('submit', submitNew);
   window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== S.tab && !(S.loaded && !tabAllowed(h))) { S.tab = h; renderAll(); } });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
