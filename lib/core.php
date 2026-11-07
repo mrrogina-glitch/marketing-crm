@@ -237,6 +237,15 @@ function migrate(PDO $pdo): void
                 }
             },
         ],
+        4 => [
+            "ALTER TABLE templates ADD kind VARCHAR(8) NOT NULL DEFAULT 'email'",
+            "ALTER TABLE templates ADD send_mode VARCHAR(8) NOT NULL DEFAULT 'manual'",
+            "ALTER TABLE templates ADD send_days INT NOT NULL DEFAULT 1",
+            "ALTER TABLE templates ADD send_time VARCHAR(5) NOT NULL DEFAULT '09:00'",
+            "ALTER TABLE templates ADD send_fixed $big NULL",
+            "ALTER TABLE templates ADD audience VARCHAR(500) NOT NULL DEFAULT ''",
+            "ALTER TABLE templates ADD inputs TEXT NULL",
+        ],
     ];
 
     foreach ($steps as $n => $sqls) {

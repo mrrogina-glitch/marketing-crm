@@ -651,3 +651,128 @@ function run_background_jobs(bool $force = false): array
     }
     return $out;
 }
+
+
+/* ---------- templates: sending time and campaigns (akcije) ---------- */
+
+const CAMPAIGN_GROUPS = [
+    'aktivni' => ['novi', 'kontaktiran', 'ponuda', 'pregovori'],
+    'dobiveni' => ['dobiven'],
+    'neaktivni' => ['izgubljen'],
+];
+
+function template_out(array $t): array
+{
+    $aud = json_decode((string) ($t['audience'] ?? ''), true);
+    $inp = json_decode((string) ($t['inputs'] ?? ''), true);
+    return [
+        'id' => (string) $t['id'],
+        'name' => (string) $t['name'],
+        'subject' => (string) $t['subject'],
+        'body' => (string) $t['body'],
+        'kind' => (string) $t['kind'],
+        'sendMode' => (string) $t['send_mode'],
+        'sendDays' => (int) $t['send_days'],
+        'sendTime' => (string) $t['send_time'],
+        'sendFixed' => $t['send_fixed'] !== null ? (int) $t['send_fixed'] : null,
+        'audience' => is_array($aud) ? $aud : ['groups' => ['aktivni'], 'kind' => 'sve', 'owner' => ''],
+        'inputs' => is_array($inp) ? $inp : (object) [],
+    ];
+}
+
+/** Moment (ms) at which a template is meant to go out. manual = now. */
+function template_send_at(array $t): int
+{
+    $now = ms();
+    if ($t['send_mode'] === 'fixed' && $t['send_fixed'] !== null) {
+        return (int) $t['send_fixed'];
+    }
+    if ($t['send_mode'] === 'delay') {
+        [$h, $m] = array_map('intval', explode(':', (string) $t['send_time']) + [0, 0]);
+        $d = new DateTimeImmutable('today', new DateTimeZone(date_default_timezone_get()));
+        $at = $d->modify('+' . max(0, (int) $t['send_days']) . ' days')->setTime($h, $m)->getTimestamp() * 1000;
+        return max($at, $now);
+    }
+    return $now;
+}
+
+function clean_audience($raw): array
+{
+    $raw = is_array($raw) ? $raw : [];
+    $groups = array_values(array_intersect(array_map('strval', (array) ($raw['groups'] ?? [])), array_keys(CAMPAIGN_GROUPS)));
+    $kind = in_array($raw['kind'] ?? '', ['tvrtka', 'osoba'], true) ? $raw['kind'] : 'sve';
+    $owner = !empty($raw['owner']) ? (string) (int) $raw['owner'] : '';
+    return ['groups' => $groups, 'kind' => $kind, 'owner' => $owner];
+}
+
+/** @return list<array> clients that have a valid, unique e-mail address and match the audience */
+function campaign_recipients(array $aud): array
+{
+    $aud = clean_audience($aud);
+    $stages = [];
+    foreach ($aud['groups'] as $g) {
+        $stages = array_merge($stages, CAMPAIGN_GROUPS[$g]);
+    }
+    if (!$stages) {
+        return [];
+    }
+    $sql = 'SELECT * FROM clients WHERE status IN (' . implode(',', array_fill(0, count($stages), '?')) . ") AND email <> ''";
+    $p = $stages;
+    if ($aud['kind'] !== 'sve') {
+        $sql .= ' AND kind = ?';
+        $p[] = $aud['kind'];
+    }
+    if ($aud['owner'] !== '') {
+        $sql .= ' AND owner_id = ?';
+        $p[] = (int) $aud['owner'];
+    }
+    $seen = [];
+    $out = [];
+    foreach (rows($sql . ' ORDER BY name', $p) as $c) {
+        $mail = strtolower(trim((string) $c['email']));
+        if (!filter_var($mail, FILTER_VALIDATE_EMAIL) || isset($seen[$mail])) {
+            continue;
+        }
+        $seen[$mail] = 1;
+        $out[] = $c;
+    }
+    return $out;
+}
+
+function fill_template_text(string $text, array $c, string $myName): string
+{
+    $first = preg_split('/\s+/', trim((string) ($c['contact'] !== '' ? $c['contact'] : $c['name'])))[0] ?? '';
+    $map = ['ime' => $first, 'tvrtka' => (string) $c['name'], 'usluga' => $c['service'] !== '' ? (string) $c['service'] : 'marketing', 'moje_ime' => $myName];
+    return preg_replace_callback('/\{\{(\w+)\}\}/', static fn ($m) => $map[$m[1]] ?? '', $text);
+}
+
+/**
+ * Queues one scheduled e-mail per recipient; the cron job sends them in batches (and respects the hourly limit).
+ * The sender of each message is the client's owner (when active), otherwise $fallback.
+ * @return array{queued:int, skipped:int, sendAt:int}
+ */
+function campaign_queue(array $t, array $fallback): array
+{
+    $at = template_send_at($t);
+    if ($t['send_mode'] === 'fixed' && $at < ms() + 60000) {
+        throw new ApiError('Točan datum i vrijeme slanja u predlošku je u prošlosti. Postavite novi.');
+    }
+    $aud = json_decode((string) $t['audience'], true) ?: [];
+    $queued = 0;
+    $skipped = 0;
+    foreach (campaign_recipients($aud) as $c) {
+        $sender = $c['owner_id'] !== null ? row('SELECT * FROM users WHERE id = ? AND active = 1', [$c['owner_id']]) : null;
+        $sender = $sender ?: $fallback;
+        $subject = mb_substr(fill_template_text((string) $t['subject'], $c, (string) $sender['name']), 0, 255);
+        $body = fill_template_text((string) $t['body'], $c, (string) $sender['name']);
+        if (row("SELECT id FROM scheduled_emails WHERE client_id = ? AND subject = ? AND status IN ('pending','sending','sent') AND created_at > ?", [$c['id'], $subject, ms() - 30 * DAY_MS])) {
+            $skipped++;
+            continue;
+        }
+        run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)',
+            [$sender['id'], $c['id'], trim((string) $c['email']), $subject, $body, '', null, $at, 'pending', ms()]);
+        $queued++;
+    }
+    return ['queued' => $queued, 'skipped' => $skipped, 'sendAt' => $at];
+}
