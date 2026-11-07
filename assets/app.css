@@ -284,3 +284,7 @@ details.info[open]>summary{margin-bottom:10px}
 .mrow.sched{cursor:default}
 code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
 @media (max-width:760px){.tplrow{grid-template-columns:1fr}}
+fieldset.aud{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0;display:grid;gap:8px;min-width:0}
+fieldset.aud legend{font-weight:600;padding:0 6px}
+.tplrow .sch{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tplrow .sch[hidden]{display:none}

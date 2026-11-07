@@ -418,10 +418,11 @@ function initApp() {
         '<div class="msg" id="arMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="arsave">Spremi</button><button class="btn" data-act="reportprev">Pregledaj izvještaj za prošli tjedan</button><button class="btn" data-act="reportsend"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji izvještaj meni</button><button class="btn" data-act="reportprevm">Pregledaj mjesečni izvještaj</button><button class="btn" data-act="reportsendm"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji mjesečni izvještaj meni</button></div>' +
         '<pre class="reportbox" id="reportBox" hidden></pre></div></section>';
       h += '<section class="panel-b"><header><h3>Predlošci e-mailova</h3><span class="muted">oznake: {{ime}} {{tvrtka}} {{usluga}} {{moje_ime}}; potpis se dodaje sam</span></header><div class="pad">' +
-        S.templates.map((t) => '<div class="tplrow" data-tid="' + esc(t.id) + '"><label class="f">Naziv<input data-f="name" value="' + esc(t.name) + '"></label><label class="f">Predmet<input data-f="subject" value="' + esc(t.subject) + '"></label>' +
-          '<label class="f wide">Tekst<textarea data-f="body" rows="6">' + esc(t.body) + '</textarea></label><div class="row-btns start"><button class="btn sm" data-act="tplsave">Spremi</button><button class="btn sm danger" data-act="tpldel">Obriši</button></div></div>').join('') +
-        '<div class="tplrow" data-tid=""><h3>Novi predložak</h3><label class="f">Naziv<input data-f="name"></label><label class="f">Predmet<input data-f="subject"></label><label class="f wide">Tekst<textarea data-f="body" rows="6"></textarea></label>' +
-        '<div class="msg" id="tplMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="tplsave">Dodaj predložak</button></div></div></div></section>';
+        S.templates.filter((t) => t.kind !== 'akcija').map((t) => tplForm(t)).join('') +
+        tplForm({ id: '', kind: 'email', name: '', subject: '', body: '' }, 'Novi predložak') + '</div></section>';
+      h += '<section class="panel-b"><header><h3>Akcije</h3><span class="muted">poruka za grupu klijenata; svakom ide osobna poruka s potpisom prodavača</span></header><div class="pad">' +
+        S.templates.filter((t) => t.kind === 'akcija').map((t) => tplForm(t)).join('') +
+        tplForm({ id: '', kind: 'akcija', name: '', subject: '', body: '' }, 'Nova akcija') + '</div></section>';
       h += '<section class="panel-b"><header><h3>Korisnici</h3><span class="muted">' + S.users.length + '</span></header><div class="tscroll"><table class="tbl"><thead><tr><th>Ime</th><th>E-mail</th><th>Uloga</th><th>Aktivan</th><th>Nova lozinka</th><th></th></tr></thead><tbody>';
       h += S.users.map((u) => { const self = u.id === S.me.id;
         return '<tr data-uid="' + esc(u.id) + '"><td class="l"><input data-f="name" value="' + esc(u.name) + '" aria-label="Ime"></td><td class="l"><input data-f="email" type="email" value="' + esc(u.email || '') + '" aria-label="E-mail"></td>' +
@@ -451,11 +452,104 @@ function initApp() {
     try { const r = await call('report_preview' + (monthly ? '&period=month' : ''), null, 'GET'); box.textContent = r.text; box.hidden = false; }
     catch (e) { toast(e.message, true); }
   }
+  const AUD_GROUPS = [['aktivni', 'Aktivni (novi, kontaktirani, ponuda, pregovori)'], ['dobiveni', 'Dobiveni (postojeći klijenti)'], ['neaktivni', 'Neaktivni (izgubljeni)']];
+  function localDT(ms) { const d = new Date(ms); return ymd(d) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function tplForm(t, title) {
+    const akc = t.kind === 'akcija';
+    const aud = t.audience || { groups: ['aktivni'], kind: 'sve', owner: '' };
+    const inp = t.inputs || {};
+    const mode = t.sendMode || 'manual';
+    const fixedVal = t.sendFixed ? localDT(t.sendFixed) : '';
+    let h = '<div class="tplrow" data-tid="' + esc(t.id) + '" data-kind="' + (akc ? 'akcija' : 'email') + '">' + (title ? '<h3>' + esc(title) + '</h3>' : '') +
+      '<label class="f">Naziv<input data-f="name" value="' + esc(t.name) + '"></label><label class="f">Predmet<input data-f="subject" value="' + esc(t.subject) + '"></label>';
+    if (akc) {
+      h += '<fieldset class="f wide aud"><legend>Kome se šalje</legend>' + AUD_GROUPS.map((g) => '<label class="chk"><input type="checkbox" data-aud="' + g[0] + '"' + (aud.groups.indexOf(g[0]) >= 0 ? ' checked' : '') + '> ' + esc(g[1]) + '</label>').join('') +
+        '<div class="grid2"><label class="f">Vrsta klijenta<select data-f="aud_kind"><option value="sve"' + (aud.kind === 'sve' ? ' selected' : '') + '>Tvrtke i fizičke osobe</option><option value="tvrtka"' + (aud.kind === 'tvrtka' ? ' selected' : '') + '>Samo tvrtke</option><option value="osoba"' + (aud.kind === 'osoba' ? ' selected' : '') + '>Samo fizičke osobe</option></select></label>' +
+        '<label class="f">Klijenti prodavača<select data-f="aud_owner"><option value="">Svi prodavači</option>' + S.users.filter((u) => u.active).map((u) => '<option value="' + esc(u.id) + '"' + (String(aud.owner) === String(u.id) ? ' selected' : '') + '>' + esc(u.name) + '</option>').join('') + '</select></label></div>' +
+        '<span class="hint">Šalje se samo klijentima koji imaju upisan ispravan e-mail, svaka adresa najviše jednom.</span></fieldset>' +
+        '<fieldset class="f wide aud"><legend>Podaci o akciji</legend><div class="grid2">' +
+        '<label class="f">Naziv akcije<input data-f="in_naziv" value="' + esc(inp.naziv || '') + '" placeholder="npr. Jesenska akcija na društvene mreže"></label>' +
+        '<label class="f">Povoljnost / cijena<input data-f="in_popust" value="' + esc(inp.popust || '') + '" placeholder="npr. 20% popusta na prvi mjesec"></label>' +
+        '<label class="f">Vrijedi do<input type="date" data-f="in_rok" value="' + esc(inp.rok || '') + '"></label>' +
+        '<label class="f">Ton poruke<select data-f="in_ton"><option value="formalan"' + (inp.ton !== 'prijateljski' && inp.ton !== 'hitan' ? ' selected' : '') + '>Formalan</option><option value="prijateljski"' + (inp.ton === 'prijateljski' ? ' selected' : '') + '>Prijateljski</option><option value="hitan"' + (inp.ton === 'hitan' ? ' selected' : '') + '>Naglasak na roku</option></select></label></div>' +
+        '<label class="f">Što nudimo (kratki opis)<textarea data-f="in_ponuda" rows="3" placeholder="npr. Vođenje Facebooka i Instagrama, 12 objava mjesečno i izvještaj.">' + esc(inp.ponuda || '') + '</textarea></label>' +
+        '<label class="f">Poziv na akciju / kontakt<input data-f="in_kontakt" value="' + esc(inp.kontakt || '') + '" placeholder="npr. Javite se odgovorom na ovu poruku ili nazovite 01 234 5678"></label>' +
+        '<div class="row-btns start"><button class="btn sm" data-act="tplsuggest">Predloži poruku</button><span class="hint">Predloženi predmet i tekst upisuju se ispod, a možete ih urediti.</span></div></fieldset>';
+    }
+    h += '<label class="f wide">Tekst<textarea data-f="body" rows="' + (akc ? 9 : 6) + '">' + esc(t.body) + '</textarea></label>' +
+      '<fieldset class="f wide aud"><legend>Kada se šalje</legend><div class="grid2"><label class="f">Način<select data-f="send_mode"><option value="manual"' + (mode === 'manual' ? ' selected' : '') + '>Ručno: odmah, kad pokrenem slanje</option><option value="delay"' + (mode === 'delay' ? ' selected' : '') + '>Zakazano: za određeni broj dana</option><option value="fixed"' + (mode === 'fixed' ? ' selected' : '') + '>Zakazano: točan datum i vrijeme</option></select></label>' +
+      '<div class="f sch" data-sch="delay"' + (mode === 'delay' ? '' : ' hidden') + '><label class="f">Za koliko dana<input type="number" min="0" max="60" data-f="send_days" value="' + esc(t.sendDays != null ? t.sendDays : 1) + '"></label><label class="f">U koliko sati<input type="time" data-f="send_time" value="' + esc(t.sendTime || '09:00') + '"></label></div>' +
+      '<label class="f sch" data-sch="fixed"' + (mode === 'fixed' ? '' : ' hidden') + '>Datum i vrijeme<input type="datetime-local" data-f="send_fixed" value="' + esc(fixedVal) + '"></label></div>' +
+      '<span class="hint">' + (akc ? 'Vrijedi i za pokretanje akcije: poruke se zakazuju za to vrijeme i šalju u serijama. ' : 'Pri slanju e-maila klijentu ovaj se termin predlaže sam, a možete ga promijeniti. ') + 'Kod ručnog slanja ništa se ne zakazuje.</span></fieldset>' +
+      '<div class="msg" data-msg role="alert"></div><div class="row-btns start"><button class="btn' + (t.id ? '' : ' primary') + ' sm" data-act="tplsave">' + (t.id ? 'Spremi' : (akc ? 'Dodaj akciju' : 'Dodaj predložak')) + '</button>' +
+      (t.id && akc ? '<button class="btn primary sm" data-act="tplrun">Pošalji akciju…</button>' : '') +
+      (t.id ? '<button class="btn sm danger" data-act="tpldel">Obriši</button>' : '') + '</div></div>';
+    return h;
+  }
+  function tplRead(row) {
+    const g = (f) => { const el = row.querySelector('[data-f="' + f + '"]'); return el ? el.value : ''; };
+    const akc = row.dataset.kind === 'akcija';
+    const body = { id: row.dataset.tid || undefined, kind: row.dataset.kind, name: g('name').trim(), subject: g('subject').trim(), body: g('body').trim(),
+      send_mode: g('send_mode'), send_days: Number(g('send_days') || 0), send_time: g('send_time') || '09:00' };
+    if (body.send_mode === 'fixed') body.send_fixed = g('send_fixed') ? new Date(g('send_fixed')).getTime() : null;
+    if (akc) {
+      body.audience = { groups: Array.from(row.querySelectorAll('[data-aud]:checked')).map((x) => x.dataset.aud), kind: g('aud_kind'), owner: g('aud_owner') };
+      body.inputs = { naziv: g('in_naziv'), ponuda: g('in_ponuda'), popust: g('in_popust'), rok: g('in_rok'), kontakt: g('in_kontakt'), ton: g('in_ton') };
+    }
+    return body;
+  }
+  function tplSuggest(row) {
+    const g = (f) => (row.querySelector('[data-f="' + f + '"]') || { value: '' }).value.trim();
+    const naziv = g('in_naziv'), ponuda = g('in_ponuda'), popust = g('in_popust'), kontakt = g('in_kontakt'), ton = g('in_ton'), rokRaw = g('in_rok');
+    const m = row.querySelector('[data-msg]');
+    if (!naziv) { m.textContent = 'Upišite naziv akcije da bih predložio poruku.'; row.querySelector('[data-f="in_naziv"]').focus(); return; }
+    m.textContent = '';
+    const rok = rokRaw ? rokRaw.split('-').reverse().join('.') + '.' : '';
+    const cta = kontakt || 'Za više informacija ili ponudu prilagođenu tvrtki {{tvrtka}} slobodno odgovorite na ovu poruku.';
+    const lines = [];
+    if (ton === 'prijateljski') {
+      lines.push('Bok {{ime}},', '', 'imamo nešto što bi moglo koristiti i tvrtki {{tvrtka}}: ' + naziv + '.', '');
+      if (ponuda) lines.push(ponuda, '');
+      if (popust) lines.push('Za Vas: ' + popust + '.');
+      if (rok) lines.push('Vrijedi do ' + rok);
+    } else if (ton === 'hitan') {
+      lines.push('Poštovani/a {{ime}},', '', rok ? 'do ' + rok + ' traje naša akcija: ' + naziv + '.' : 'traje naša akcija: ' + naziv + '.', '');
+      if (ponuda) lines.push(ponuda, '');
+      if (popust) lines.push('Povoljnost: ' + popust + '.');
+      lines.push('Broj mjesta je ograničen, pa Vas molimo da se javite što prije.');
+    } else {
+      lines.push('Poštovani/a {{ime}},', '', 'obavještavamo Vas o našoj akciji: ' + naziv + '.', '');
+      if (ponuda) lines.push(ponuda, '');
+      if (popust) lines.push('Povoljnost: ' + popust + '.');
+      if (rok) lines.push('Akcija traje do ' + rok);
+    }
+    if (lines[lines.length - 1] !== '') lines.push('');
+    lines.push(cta, '', 'Lijep pozdrav,');
+    row.querySelector('[data-f="body"]').value = lines.join('\n');
+    const sj = row.querySelector('[data-f="subject"]');
+    if (!sj.value.trim()) sj.value = naziv + (popust ? ': ' + popust : '');
+    if (!row.querySelector('[data-f="name"]').value.trim()) row.querySelector('[data-f="name"]').value = naziv;
+    m.textContent = 'Poruka je predložena. Pregledajte je i spremite.';
+  }
   async function tplSave(row) {
-    const g = (f) => row.querySelector('[data-f="' + f + '"]');
-    const body = { id: row.dataset.tid || undefined, name: g('name').value.trim(), subject: g('subject').value.trim(), body: g('body').value.trim() };
-    const ok = await safe(() => call('template_save', body), body.id ? 'Predložak spremljen' : 'Predložak dodan');
+    const body = tplRead(row);
+    const ok = await safe(() => call('template_save', body), body.id ? 'Spremljeno' : (body.kind === 'akcija' ? 'Akcija dodana' : 'Predložak dodan'));
     if (ok) { await refresh(true); renderSettings(); }
+  }
+  async function tplRun(row) {
+    const body = tplRead(row); const m = row.querySelector('[data-msg]');
+    m.textContent = '';
+    if (!body.name || !body.subject || !body.body) { m.textContent = 'Naziv, predmet i tekst su obavezni.'; return; }
+    try {
+      await call('template_save', body);
+      const pv = await call('campaign_preview', { audience: body.audience });
+      if (!pv.count) { m.textContent = 'Nijedan klijent ne odgovara odabranim skupinama (ili nema upisan e-mail).'; return; }
+      const when = body.send_mode === 'manual' ? 'odmah (u serijama)' : body.send_mode === 'fixed' ? 'u ' + fmtDate(body.send_fixed) + ' ' + fmtTime(body.send_fixed) : 'za ' + body.send_days + ' d u ' + body.send_time;
+      if (!confirm('Akcija "' + body.name + '" šalje se na ' + pv.count + ' adresa, ' + when + '.\n\nPrimjeri: ' + pv.sample.join(', ') + (pv.count > pv.sample.length ? '…' : '') + '\n\nNastaviti?')) { refresh(true).then(renderSettings); return; }
+      const r = await call('campaign_send', { id: row.dataset.tid });
+      toast('Zakazano ' + r.queued + ' poruka' + (r.skipped ? ' (preskočeno ' + r.skipped + ': već poslano zadnjih 30 dana)' : '') + '. Vidi se u Inboxu pod Zakazano slanje.');
+      await refresh(true); renderSettings();
+    } catch (e) { m.textContent = e.message; }
   }
   async function pwChange() {
     const cur = $('pwCur').value, n1 = $('pwNew').value, n2 = $('pwNew2').value, m = $('pwMsg');
@@ -661,17 +755,29 @@ function initApp() {
     $('mDocs').innerHTML = '<b>Privici</b>' + (docs.length ? docs.map((d) => '<label class="chk"><input type="checkbox" data-doc="' + esc(d.id) + '"' + (S.mailDocs.has(d.id) ? ' checked' : '') + '> ' + esc(d.name) + ' <span class="hint">' + esc(fmtSize(d.size)) + '</span></label>').join('') : '<span class="hint"> nema spremljenih dokumenata klijenta</span>') +
       '<label class="btn sm filebtn">Dodaj datoteku<input type="file" id="mFile" hidden></label>';
   }
+  function applyTplSchedule(t) {
+    let at = 0;
+    if (t && t.sendMode === 'delay') {
+      const d = new Date(); d.setDate(d.getDate() + (t.sendDays || 0));
+      const [hh, mm] = String(t.sendTime || '09:00').split(':'); d.setHours(+hh, +mm, 0, 0); at = d.getTime();
+    } else if (t && t.sendMode === 'fixed' && t.sendFixed) at = t.sendFixed;
+    const later = at > Date.now() + 60000;
+    if (later) $('mAt').value = localDT(at);
+    $('mWhen').value = later ? 'later' : 'now'; $('mAtW').hidden = !later;
+    $('mSend').textContent = later ? 'Zakaži slanje' : 'Pošalji e-mail';
+  }
   function openMail(tplPrefix) {
     const c = byId(S.openId); if (!c) return;
     S.mailClient = c.id; S.mailDocs = new Set();
     $('mSub').textContent = c.name + (c.kind === 'osoba' ? ' · fizička osoba' : (c.contact ? ' · ' + c.contact : ''));
-    const tpls = S.templates;
+    const tpls = S.templates.filter((t) => t.kind !== 'akcija');
     fillSelect($('mTpl'), [['', '(prazna poruka)']].concat(tpls.map((t) => [t.id, t.name])), '');
     const pick = (tplPrefix && tpls.find((t) => t.name.toLowerCase().startsWith(tplPrefix.toLowerCase()))) || tpls[0];
     $('mTo').value = c.email || '';
     if (pick) { $('mTpl').value = pick.id; const t = fillTpl(pick, c); $('mSubj').value = t.subject; $('mBody').value = t.body; } else { $('mSubj').value = ''; $('mBody').value = ''; }
     $('mSig').textContent = S.me.signatureEffective || '';
     $('mWhen').value = 'now'; $('mAtW').hidden = true; $('mAt').value = defaultSendAt(); $('mRemind').value = '3';
+    applyTplSchedule(pick);
     $('mFrom').textContent = S.mail.enabled ? 'Poruka odlazi s adrese ' + S.mail.from + '. Odgovori klijenta stižu u Inbox i uz klijenta.' : 'Slanje e-maila još nije podešeno. Administrator ga podešava u config.php.';
     $('mSend').disabled = !S.mail.enabled; $('mSend').textContent = 'Pošalji e-mail'; $('mMsg').textContent = '';
     renderMailDocs();
@@ -759,6 +865,8 @@ function initApp() {
       else if (act === 'reportsendm') safe(() => call('report_send', { monthly: true }).then((r) => { if (r.ok === false) throw new Error(r.error || 'Slanje nije uspjelo.'); toast('Mjesečni izvještaj poslan na ' + r.to); }));
       else if (act === 'reportsend') safe(() => call('report_send', {}).then((r) => { if (r.ok === false) throw new Error(r.error || 'Slanje nije uspjelo.'); toast('Izvještaj poslan na ' + r.to); }));
       else if (act === 'tplsave') tplSave(a.closest('.tplrow'));
+      else if (act === 'tplsuggest') tplSuggest(a.closest('.tplrow'));
+      else if (act === 'tplrun') tplRun(a.closest('.tplrow'));
       else if (act === 'tpldel') { if (confirm('Obrisati predložak?')) safe(() => call('template_delete', { id: a.closest('.tplrow').dataset.tid }), 'Predložak obrisan').then((ok) => { if (ok) refresh(true).then(renderSettings); }); }
       else if (act === 'pwchange') pwChange();
       else if (act === 'usave') userSave(a.closest('tr'));
@@ -776,13 +884,14 @@ function initApp() {
     else if (id === 'fKind') { S.fKind = ev.target.value; renderClients(); }
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
     else if (ev.target.name === 'nKindR') applyNewKind();
+    else if (ev.target.dataset && ev.target.dataset.f === 'send_mode') { const r = ev.target.closest('.tplrow'); r.querySelectorAll('[data-sch]').forEach((x) => { x.hidden = x.dataset.sch !== ev.target.value; }); }
     else if (id === 'mWhen') { const l = ev.target.value === 'later'; $('mAtW').hidden = !l; $('mSend').textContent = l ? 'Zakaži slanje' : 'Pošalji e-mail'; }
     else if (id === 'docFile') onDocFile(ev.target, false);
     else if (id === 'mFile') onDocFile(ev.target, true);
     else if (ev.target.dataset && ev.target.dataset.doc) { if (ev.target.checked) S.mailDocs.add(ev.target.dataset.doc); else S.mailDocs.delete(ev.target.dataset.doc); }
     else if (id === 'fSort') { S.sort = ev.target.value; renderClients(); }
     else if (id === 'iFilter') { S.iFilter = ev.target.value; renderInbox(); }
-    else if (id === 'mTpl') { const c = byId(S.mailClient); const t = S.templates.find((x) => x.id === ev.target.value); if (c && t) { const f = fillTpl(t, c); $('mSubj').value = f.subject; $('mBody').value = f.body; } else if (!ev.target.value) { $('mSubj').value = ''; $('mBody').value = ''; } }
+    else if (id === 'mTpl') { const c = byId(S.mailClient); const t = S.templates.find((x) => x.id === ev.target.value); if (c && t) { const f = fillTpl(t, c); $('mSubj').value = f.subject; $('mBody').value = f.body; applyTplSchedule(t); } else if (!ev.target.value) { $('mSubj').value = ''; $('mBody').value = ''; } }
   });
   document.addEventListener('input', (ev) => {
     if (ev.target.id === 'fq') { S.q = ev.target.value; renderClients(); }
