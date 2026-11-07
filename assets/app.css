@@ -544,3 +544,10 @@ body.auth{background:radial-gradient(900px 500px at 15% 10%,color-mix(in srgb,va
 .mrow.replied .dot{background:var(--good)}
 .chip.replied{background:color-mix(in srgb,var(--good) 16%,var(--surface));color:var(--good);max-width:220px}
 .revmore{display:flex;justify-content:center;padding:4px 22px 6px}
+
+/* prijava: logo */
+.auth-box{width:min(440px,100%);padding:0 36px 36px;overflow:hidden}
+.auth-logo{margin:0 -36px 4px;padding:34px 40px 28px;background:#F7F4EC;border-bottom:1px solid var(--line);display:flex;justify-content:center}
+.auth-logo img{display:block;width:100%;max-width:300px;height:auto}
+.authname{font-size:22px;font-weight:750;margin-top:8px}
+@media (max-width:480px){.auth-box{padding:0 22px 28px}.auth-logo{margin:0 -22px 4px;padding:28px 28px 22px}}
