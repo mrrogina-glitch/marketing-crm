@@ -238,7 +238,7 @@ function email_out(array $r): array
 
 function load_email(string $id): array
 {
-    $e = row('SELECT * FROM emails WHERE id = ?', [(int) $id]);
+    $e = row('SELECT * FROM emails WHERE id = ? AND deleted_at IS NULL', [(int) $id]);
     if (!$e) {
         throw new ApiError('Poruka ne postoji.', 404);
     }
@@ -372,6 +372,21 @@ try {
             out(['ok' => true]);
         }
 
+        case 'email_delete': {
+            $u = need_write();
+            $e = load_email((string) (body()['id'] ?? ''));
+            $own = $e['client_id'] !== null ? row('SELECT owner_id FROM clients WHERE id = ?', [$e['client_id']]) : null;
+            $allowed = $u['role'] === 'admin' || (int) ($e['user_id'] ?? 0) === (int) $u['id'] || ($own && (int) $own['owner_id'] === (int) $u['id'])
+                || ($e['client_id'] === null && $e['direction'] === 'in');
+            if (!$allowed) {
+                throw new ApiError('Poruku može obrisati administrator, pošiljatelj ili prodavač klijenta.', 403);
+            }
+            delete_document_rows(rows('SELECT id, stored FROM documents WHERE email_id = ?', [$e['id']]));
+            run("UPDATE emails SET deleted_at = ?, client_id = NULL, remind_done_at = COALESCE(remind_done_at, ?), subject = '', body = '', preview = '', attachments = NULL, from_name = '', reply_to = '', in_reply_to = NULL WHERE id = ?", [ms(), ms(), $e['id']]);
+            audit($e['client_id'] !== null ? (int) $e['client_id'] : null, (int) $u['id'], 'email', 'Obrisana poruka: ' . ((string) $e['subject'] !== '' ? $e['subject'] : '(bez predmeta)') . ' (' . ($e['direction'] === 'in' ? 'od ' . $e['from_email'] : 'za ' . $e['to_email']) . ')');
+            out(['ok' => true]);
+        }
+
         case 'logout': {
             need_post();
             start_session();
@@ -389,7 +404,7 @@ try {
             $a = row('SELECT COUNT(*) AS c, COALESCE(MAX(updated_at), 0) AS m, COALESCE(SUM(value), 0) AS s FROM clients');
             $cg = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM campaigns');
             $b = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM notes');
-            $em = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m, COALESCE(SUM(CASE WHEN read_at IS NULL THEN 0 ELSE 1 END), 0) AS r, COALESCE(SUM(COALESCE(client_id, 0)), 0) AS k FROM emails');
+            $em = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m, COALESCE(SUM(CASE WHEN read_at IS NULL THEN 0 ELSE 1 END), 0) AS r, COALESCE(SUM(COALESCE(client_id, 0)), 0) AS k FROM emails WHERE deleted_at IS NULL');
             $usersOut = users_out($u);
             $imapOn = imap_cfg() !== null;
             $lastSync = (int) (meta_get('imap_last_sync') ?? 0);
@@ -421,7 +436,7 @@ try {
                 'users' => $usersOut,
                 'clients' => $clients,
                 'notes' => $notes,
-                'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails ORDER BY msg_date DESC, id DESC LIMIT 600')),
+                'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'tasks' => $tasks,
                 'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
