@@ -306,7 +306,7 @@ function initApp() {
       (adminAll ? '<label class="f inl">Prodavač<select id="revUser"><option value="">Svi (ukupno)</option>' + S.users.filter((u) => u.active).map((u) => '<option value="' + esc(u.id) + '"' + (S.revUser === u.id ? ' selected' : '') + '>' + esc(u.name) + '</option>').join('') + '</select></label>' : '') + '</div>';
     if (!R) { el.innerHTML = h + '<p class="muted pad">Učitavanje…</p>'; return; }
     const data = (R[kind] || []).filter((x) => !S.revUser || x.u === S.revUser);
-    const per = revPeriods(kind);
+    const per = revPeriods(kind, S.revMore ? 12 : 4);
     const extra = Array.from(new Set(data.map((x) => x.s))).filter((s) => !SERVICES.includes(s));
     const cols = SERVICES.concat(extra);
     const sum = (f) => data.reduce((t, x) => t + (f(x) ? x.v : 0), 0);
@@ -323,6 +323,7 @@ function initApp() {
           owners.map((o) => '<tr><th>' + esc(o === '0' ? 'Bez prodavača' : person(o)) + '</th><td class="nums">' + eur(osum(o, (x) => x.p === k0)) + '</td><td class="nums">' + eur(osum(o, (x) => x.p === k1)) + '</td><td class="nums"><b>' + eur(osum(o, (x) => allk.includes(x.p))) + '</b></td></tr>').join('') + '</tbody></table></div>';
       }
     }
+    h += '<div class="revmore"><button class="btn sm" data-act="revmore">' + (S.revMore ? 'Prikaži manje (zadnja 4 ' + (kind === 'weekly' ? 'tjedna' : 'mjeseca') + ')' : 'Prikaži više (zadnjih 12 ' + (kind === 'weekly' ? 'tjedana' : 'mjeseci') + ')') + '</button></div>';
     h += '<p class="muted pad small">Kampanja se računa u tjedan/mjesec u kojem počinje. Ako klijent ima više usluga, vrijednost se dijeli jednako među njima.</p>';
     el.innerHTML = h;
   }
@@ -531,9 +532,10 @@ function initApp() {
       const c = e.clientId ? byId(e.clientId) : null;
       const who = e.dir === 'in' ? (e.fromName || e.fromEmail || '(nepoznato)') : 'Za: ' + e.to;
       const unread = e.dir === 'in' && !e.read;
-      return '<button class="mrow' + (unread ? ' unread' : '') + '" data-mail="' + esc(e.id) + '"><span class="dot"></span>' +
+      const rb = e.dir === 'in' && e.repliedBy ? person(e.repliedBy) : '';
+      return '<button class="mrow' + (unread ? ' unread' : '') + (rb ? ' replied' : '') + '" data-mail="' + esc(e.id) + '"><span class="dot"></span>' +
         '<span class="m-body"><span class="m-from">' + esc(who) + '</span><span class="m-subj">' + esc(e.subject || '(bez predmeta)') + (e.att ? ' · privitak' : '') + '</span><span class="m-prev">' + esc(e.preview) + '</span></span>' +
-        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : '') + '</span></button>';
+        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : '') + '</span></button>';
     }).join('');
   }
   async function syncInbox(force, quiet) {
@@ -1367,6 +1369,7 @@ function initApp() {
       else if (act === 'maildel') deleteMail(a.dataset.id);
       else if (act === 'taskdone' || act === 'taskdel') taskAct(a);
       else if (act === 'stper') { S.stKind = a.dataset.v; S.stIdx = 0; renderOverview(); }
+      else if (act === 'revmore') { S.revMore = !S.revMore; renderRevenue(); }
       else if (act === 'revper') { S.revPeriod = a.dataset.v; renderRevenue(); }
       else if (act === 'mail') openMail('Prvi');
       else if (act === 'msend') sendMail();

@@ -537,3 +537,10 @@ body.auth{background:radial-gradient(900px 500px at 15% 10%,color-mix(in srgb,va
   .sh-h{padding:18px 16px 12px}.sh-b{padding:16px 16px 28px}
 }
 .c-main .chip,.c-main .pill{max-width:none}
+
+/* inbox: odgovorene poruke */
+.mrow.replied{background:color-mix(in srgb,var(--good) 7%,var(--surface));box-shadow:inset 3px 0 0 var(--good)}
+.mrow.replied:hover{background:color-mix(in srgb,var(--good) 12%,var(--surface))}
+.mrow.replied .dot{background:var(--good)}
+.chip.replied{background:color-mix(in srgb,var(--good) 16%,var(--surface));color:var(--good);max-width:220px}
+.revmore{display:flex;justify-content:center;padding:4px 22px 6px}
