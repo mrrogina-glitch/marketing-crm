@@ -221,12 +221,12 @@ function send_and_store(?array $u, string $to, string $subject, string $text, ?i
 }
 
 /** Logs a sent client e-mail as a note (every contact must leave a trace) and fills in a missing client address. */
-function record_client_email(array $c, array $u, string $to, string $subject, string $text): void
+function record_client_email(array $c, array $u, string $to, string $subject, string $text, bool $bulk = false): void
 {
     $t = ms();
-    transaction(static function () use ($c, $u, $to, $subject, $text, $t): void {
-        run('INSERT INTO notes (client_id, author_id, type, subject, body, to_email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [$c['id'], $u['id'], 'email', $subject, $text, $to, $t]);
+    transaction(static function () use ($c, $u, $to, $subject, $text, $t, $bulk): void {
+        run('INSERT INTO notes (client_id, author_id, type, subject, body, to_email, created_at, bulk) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$c['id'], $u['id'], 'email', $subject, $text, $to, $t, $bulk ? 1 : 0]);
         if ($c['email'] === '') {
             run('UPDATE clients SET email = ?, updated_at = ? WHERE id = ?', [$to, $t, $c['id']]);
         } else {
@@ -236,6 +236,65 @@ function record_client_email(array $c, array $u, string $to, string $subject, st
 }
 
 /* ---------- scheduled sending ---------- */
+
+const BULK_BURST = 5;  // najviše toliko grupnih poruka po jednom pokretanju
+
+/** Ograničenja grupne pošte: 50 na sat, termin 05–16 sati (config.php 'bulk' služi samo za testiranje). */
+function bulk_cfg(string $k): int
+{
+    $def = ['per_hour' => 50, 'from' => 5, 'to' => 16];
+    return (int) cfg('bulk.' . $k, $def[$k]);
+}
+
+function bulk_window_open(?int $tsMs = null): bool
+{
+    $h = (int) date('G', intdiv($tsMs ?? ms(), 1000));
+    return $h >= bulk_cfg('from') && $h < bulk_cfg('to');
+}
+
+function bulk_sent_last_hour(): int
+{
+    return (int) row("SELECT COUNT(*) AS c FROM scheduled_emails WHERE bulk = 1 AND status = 'sent' AND sent_at > ?", [ms() - 3600000])['c'];
+}
+
+/** Koliko se grupnih poruka smije poslati upravo sada (0 izvan termina ili kad je sat pun). */
+function bulk_quota_now(): int
+{
+    return bulk_window_open() ? max(0, bulk_cfg('per_hour') - bulk_sent_last_hour()) : 0;
+}
+
+/** Procjena kada će se poslati zadnja od $n grupnih poruka (ms). */
+function bulk_eta(int $n): int
+{
+    $t = intdiv(ms(), 1000);
+    if ($n <= 0) {
+        return $t * 1000;
+    }
+    $left = $n;
+    $first = true;
+    for ($i = 0; $i < 24 * 60 && $left > 0; $i++) {
+        if (bulk_window_open($t * 1000)) {
+            $cap = $first ? max(0, bulk_cfg('per_hour') - bulk_sent_last_hour()) : bulk_cfg('per_hour');
+            $left -= $cap;
+            $first = false;
+            if ($left <= 0) {
+                $frac = max(1, $cap + $left) / max(1, $cap);
+                return (int) (($t + 3600 * $frac) * 1000);
+            }
+            $t += 3600;
+        } else {
+            $d = new DateTimeImmutable('@' . $t);
+            $d = $d->setTimezone(new DateTimeZone(date_default_timezone_get()));
+            $next = $d->setTime(bulk_cfg('from'), 0);
+            if ($next->getTimestamp() <= $t) {
+                $next = $next->modify('+1 day');
+            }
+            $t = $next->getTimestamp();
+            $first = false;
+        }
+    }
+    return $t * 1000;
+}
 
 function scheduled_out(array $r): array
 {
@@ -256,7 +315,12 @@ function process_scheduled(): int
 {
     run("UPDATE scheduled_emails SET status = 'failed', error = ? WHERE status = 'sending' AND send_at < ?",
         ['Slanje je prekinuto. Provjerite mapu Poslano i po potrebi zakažite ponovno.', ms() - 1800000]);
-    $due = rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND send_at <= ? ORDER BY send_at LIMIT 20", [ms()]);
+    $due = rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND bulk = 0 AND send_at <= ? ORDER BY send_at LIMIT 20", [ms()]);
+    // grupna pošta: najviše bulk_cfg('per_hour') na sat i samo u terminu bulk_cfg('from')–bulk_cfg('to') sati
+    $quota = min(BULK_BURST, bulk_quota_now());
+    if ($quota > 0) {
+        $due = array_merge($due, rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND bulk = 1 AND send_at <= ? ORDER BY send_at, id LIMIT " . (int) $quota, [ms()]));
+    }
     $sent = 0;
     foreach ($due as $s) {
         if (run("UPDATE scheduled_emails SET status = 'sending' WHERE id = ? AND status = 'pending'", [$s['id']]) !== 1) {
@@ -288,7 +352,7 @@ function process_scheduled(): int
             run("UPDATE scheduled_emails SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?", [ms(), $s['id']]);
             $sent++;
             try {
-                record_client_email($c, $u, (string) $s['to_email'], (string) $s['subject'], (string) $s['body']);
+                record_client_email($c, $u, (string) $s['to_email'], (string) $s['subject'], (string) $s['body'], (int) $s['bulk'] === 1);
             } catch (Throwable $e) {
                 error_log('CRM scheduled note: ' . $e->getMessage());
             }
@@ -969,6 +1033,7 @@ function campaign_queue(array $t, array $fallback): array
     $aud = json_decode((string) $t['audience'], true) ?: [];
     $queued = 0;
     $skipped = 0;
+    $batch = 'a' . $t['id'] . '-' . date('ymdHi');
     foreach (campaign_recipients($aud) as $c) {
         $sender = $c['owner_id'] !== null ? row('SELECT * FROM users WHERE id = ? AND active = 1', [$c['owner_id']]) : null;
         $sender = $sender ?: $fallback;
@@ -978,9 +1043,9 @@ function campaign_queue(array $t, array $fallback): array
             $skipped++;
             continue;
         }
-        run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)',
-            [$sender['id'], $c['id'], trim((string) $c['email']), $subject, $body, '', null, $at, 'pending', ms()]);
+        run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at, bulk, batch)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)',
+            [$sender['id'], $c['id'], trim((string) $c['email']), $subject, $body, '', null, $at, 'pending', ms(), $batch]);
         $queued++;
     }
     return ['queued' => $queued, 'skipped' => $skipped, 'sendAt' => $at];

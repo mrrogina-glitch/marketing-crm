@@ -254,6 +254,18 @@ function migrate(PDO $pdo): void
             "ALTER TABLE clients ADD camp_start DATE NULL",
             "ALTER TABLE clients ADD camp_end DATE NULL",
         ],
+        13 => [
+            "ALTER TABLE scheduled_emails ADD bulk TINYINT NOT NULL DEFAULT 0",
+            "ALTER TABLE scheduled_emails ADD batch VARCHAR(24) NULL",
+            "ALTER TABLE notes ADD bulk TINYINT NOT NULL DEFAULT 0",
+            "CREATE INDEX ix_sched_bulk ON scheduled_emails (bulk, status, sent_at)",
+            static function (PDO $pdo): void {
+                $ins = $pdo->prepare('INSERT INTO templates (name, subject, body, sort_order, updated_at) VALUES (?, ?, ?, ?, ?)');
+                foreach (campaign_templates() as $i => $t) {
+                    $ins->execute([$t[0], $t[1], $t[2], 20 + $i, (int) (microtime(true) * 1000)]);
+                }
+            },
+        ],
         12 => [
             "CREATE TABLE owner_history (id $pk, client_id $big NOT NULL, owner_id $big NOT NULL, from_at $big NOT NULL)$opt",
             "CREATE INDEX ix_ownerhist_client ON owner_history (client_id, from_at)",
@@ -337,6 +349,21 @@ function default_templates(): array
             "Poštovani/a {{ime}},\n\nhvala Vam na izdvojenom vremenu. Ukratko, dogovorili smo sljedeće:\n\n- \n- \n\nSljedeći korak je moj: poslat ću Vam prijedlog do dogovorenog roka.\n\nLijep pozdrav,"],
         ['Zahvala na suradnji', 'Hvala na povjerenju, {{tvrtka}}',
             "Poštovani/a {{ime}},\n\nzahvaljujemo Vam na povjerenju. Veselimo se suradnji na usluzi: {{usluga}}.\n\nU idućim danima javit ćemo Vam se s popisom potrebnih materijala i terminom početnog sastanka.\n\nLijep pozdrav,"],
+    ];
+}
+
+/** Predlošci za e-mail kampanje: početni mail i izgubljeni klijenti. */
+function campaign_templates(): array
+{
+    return [
+        ['Početni mail (predstavljanje)', 'Predstavljanje suradnje: {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\nzovem se {{moje_ime}} i javljam Vam se iz marketinške agencije. Tvrtkama poput {{tvrtka}} pomažemo da kroz radijske oglase, PR objave na portalima i baner oglašavanje dođu do novih kupaca.\n\nRado bih Vam u kratkom razgovoru predstavio/la mogućnosti koje bi bile korisne za Vaše poslovanje. Ako Vam odgovara, javite mi termin koji Vam je prikladan.\n\nUnaprijed zahvaljujem na odgovoru.\n\nLijep pozdrav,"],
+        ['Izgubljeni klijent: ponovni kontakt', 'Ponovno se javljamo, {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\nprošlo je neko vrijeme otkako smo posljednji put razgovarali o usluzi: {{usluga}}. Razumijemo da tada vrijeme možda nije bilo prikladno, no željeli bismo Vas upoznati s novostima u našoj ponudi.\n\nAko Vas suradnja u međuvremenu zanima, rado ćemo pripremiti novu, prilagođenu ponudu bez ikakvih obveza.\n\nHvala Vam na vremenu i veselimo se Vašem odgovoru.\n\nLijep pozdrav,"],
+        ['Izgubljeni klijent: ponuda za povratak', 'Nova ponuda za {{tvrtka}}',
+            "Poštovani/a {{ime}},\n\ncijenimo što ste nam ranije ukazali povjerenje te Vam se javljamo s prijedlogom za novu suradnju. Za {{tvrtka}} pripremili smo prilagođenu ponudu za uslugu: {{usluga}}.\n\nAko želite, odgovorite na ovu poruku ili nas nazovite pa ćemo dogovoriti razgovor u terminu koji Vam odgovara.\n\nLijep pozdrav,"],
+        ['Izgubljeni klijent: kratka provjera', 'Je li suradnja sada aktualna, {{tvrtka}}?',
+            "Poštovani/a {{ime}},\n\nkratko Vam se javljam kako bih provjerio/la je li oglašavanje trenutačno tema u Vašem poslovanju. Ako jest, rado ćemo Vam poslati pregled mogućnosti i okvirne cijene.\n\nAko nije, hvala Vam na dosadašnjem vremenu i slobodno nam se javite kada Vam zatreba podrška.\n\nLijep pozdrav,"],
     ];
 }
 
