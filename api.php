@@ -126,6 +126,53 @@ function load_client(string $id): array
     return $c;
 }
 
+/** Inbox 2 settings for the Postavke form (never includes the password). */
+function imap2_public(): array
+{
+    $c = imap_cfg(2);
+    $stored = imap2_stored() !== null;
+    return [
+        'host' => (string) ($c['host'] ?? ''),
+        'port' => (int) ($c['port'] ?? 993),
+        'secure' => (string) ($c['secure'] ?? 'ssl'),
+        'user' => (string) ($c['user'] ?? ''),
+        'folder' => (string) ($c['folder'] ?? 'INBOX'),
+        'hasPass' => $c !== null && (string) ($c['pass'] ?? '') !== '',
+        'source' => $c === null ? '' : ($stored ? 'settings' : 'config'),
+    ];
+}
+
+/** Validates the Inbox 2 form; an empty password keeps the saved one. */
+function imap2_from_input(array $in): array
+{
+    $host = strtolower(trim((string) ($in['host'] ?? '')));
+    if (!preg_match('/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/', $host)) {
+        throw new ApiError('Upišite ispravan naziv IMAP poslužitelja (npr. mail.vip-grupa.eu).');
+    }
+    $port = (int) ($in['port'] ?? 993);
+    if ($port < 1 || $port > 65535) {
+        throw new ApiError('Port mora biti između 1 i 65535.');
+    }
+    $secure = in_array($in['secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $in['secure'] : 'ssl';
+    $user = trim((string) ($in['user'] ?? ''));
+    if ($user === '' || mb_strlen($user) > 190 || preg_match('/[\r\n]/', $user)) {
+        throw new ApiError('Upišite korisničko ime (e-mail adresu sandučića).');
+    }
+    $folder = trim((string) ($in['folder'] ?? '')) ?: 'INBOX';
+    if (mb_strlen($folder) > 120 || preg_match('/[\r\n"\\\\]/', $folder)) {
+        throw new ApiError('Naziv mape nije ispravan.');
+    }
+    $pass = (string) ($in['pass'] ?? '');
+    $old = imap_cfg(2);
+    if ($pass === '' && $old !== null && strtolower((string) $old['user']) === strtolower($user)) {
+        $pass = (string) ($old['pass'] ?? '');
+    }
+    if ($pass === '') {
+        throw new ApiError('Upišite lozinku sandučića.');
+    }
+    return ['host' => $host, 'port' => $port, 'secure' => $secure, 'user' => $user, 'folder' => $folder, 'pass' => $pass];
+}
+
 function email_out(array $r): array
 {
     return [
@@ -243,7 +290,7 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$a, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '']));
+            $rev = md5(json_encode([$a, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -267,6 +314,7 @@ try {
                     'from' => Mailer::fromEmail(),
                     'imap' => $imapOn,
                     'imap2' => $box2,
+                    'imap2Cfg' => $u['role'] === 'admin' ? imap2_public() : null,
                     'lastSync2' => $last2,
                     'error2' => $u['role'] === 'admin' ? $err2 : ($err2 !== '' ? 'error' : ''),
                     'lastSync' => $lastSync,
@@ -549,6 +597,51 @@ try {
                 }
             }
             out(['ok' => true, 'new' => $r['new'] + $new2, 'skipped' => $r['skipped']]);
+        }
+
+        case 'imap2_test': {
+            $u = need_write();
+            need_admin($u);
+            $c = imap2_from_input(body());
+            try {
+                $im = new ImapClient($c);
+                try {
+                    $im->select($c['folder']);
+                } finally {
+                    $im->close();
+                }
+            } catch (Throwable $e) {
+                out(['ok' => false, 'error' => $e->getMessage()]);
+            }
+            out(['ok' => true]);
+        }
+
+        case 'imap2_save': {
+            $u = need_write();
+            need_admin($u);
+            $c = imap2_from_input(body());
+            $prev = imap_cfg(2);
+            $changed = $prev === null || strtolower((string) $prev['user']) !== strtolower($c['user']) || $prev['host'] !== $c['host'] || $prev['folder'] !== $c['folder'];
+            $store = $c;
+            $store['pass_enc'] = imap2_encrypt($c['pass']);
+            unset($store['pass']);
+            setting_set('imap2', json_encode($store));
+            if ($changed) {
+                foreach (['imap_last_uid_2', 'imap_uidvalidity_2', 'imap_last_sync_2', 'imap_last_error_2'] as $k) {
+                    run('DELETE FROM meta WHERE k = ?', [$k]);
+                }
+            }
+            out(['ok' => true]);
+        }
+
+        case 'imap2_clear': {
+            $u = need_write();
+            need_admin($u);
+            run("DELETE FROM settings WHERE k = 'imap2'");
+            foreach (['imap_last_uid_2', 'imap_uidvalidity_2', 'imap_last_sync_2', 'imap_last_error_2'] as $k) {
+                run('DELETE FROM meta WHERE k = ?', [$k]);
+            }
+            out(['ok' => true]);
         }
 
         case 'mail_test': {
