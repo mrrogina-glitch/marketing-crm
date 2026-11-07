@@ -246,6 +246,9 @@ function migrate(PDO $pdo): void
             "ALTER TABLE templates ADD audience VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE templates ADD inputs TEXT NULL",
         ],
+        5 => [
+            "ALTER TABLE emails ADD mailbox INT NOT NULL DEFAULT 1",
+        ],
     ];
 
     foreach ($steps as $n => $sqls) {

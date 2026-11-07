@@ -6,8 +6,20 @@ declare(strict_types=1);
  * Settings: config.php, section "imap" (falls back to the "mail" credentials).
  */
 
-function imap_cfg(): ?array
+/** $box 1 = glavni sandučić (config 'imap'), 2 = dodatni sandučić samo za primanje (config 'imap2'). */
+function imap_cfg(int $box = 1): ?array
 {
+    if ($box === 2) {
+        $i2 = cfg('imap2');
+        if (!is_array($i2) || empty($i2['user']) || empty($i2['pass'])) {
+            return null;
+        }
+        $base = cfg('imap');
+        $i2 += is_array($base) ? array_diff_key($base, ['user' => 1, 'pass' => 1, 'folder' => 1, 'sent_folder' => 1]) : [];
+        $i2['folder'] = $i2['folder'] ?? 'INBOX';
+        $i2['sent_folder'] = '';
+        return empty($i2['host']) ? null : $i2;
+    }
     $i = cfg('imap');
     $m = cfg('mail');
     if (!is_array($i) || empty($i['host'])) {
@@ -433,9 +445,10 @@ function sent_copy(string $raw): void
  * Pulls new messages from the INBOX into the emails table.
  * @return array{new:int,skipped:bool}
  */
-function sync_inbox(): array
+function sync_inbox(int $box = 1): array
 {
-    $c = imap_cfg();
+    $sfx = $box === 2 ? '_2' : '';
+    $c = imap_cfg($box);
     if (!$c) {
         throw new MailException('IMAP nije podešen u config.php.');
     }
@@ -450,10 +463,10 @@ function sync_inbox(): array
         $im = new ImapClient($c);
         $folder = (string) ($c['folder'] ?? 'INBOX');
         $sel = $im->select($folder);
-        $lastUid = (int) (meta_get('imap_last_uid') ?? 0);
-        if ((int) (meta_get('imap_uidvalidity') ?? 0) !== $sel['uidvalidity']) {
+        $lastUid = (int) (meta_get('imap_last_uid' . $sfx) ?? 0);
+        if ((int) (meta_get('imap_uidvalidity' . $sfx) ?? 0) !== $sel['uidvalidity']) {
             $lastUid = 0;
-            meta_set('imap_uidvalidity', (string) $sel['uidvalidity']);
+            meta_set('imap_uidvalidity' . $sfx, (string) $sel['uidvalidity']);
         }
         if ($lastUid === 0) {
             $uids = $im->uidSearch('ALL');
@@ -469,17 +482,17 @@ function sync_inbox(): array
             if (!$msg) {
                 continue;
             }
-            if (store_incoming($msg['raw'], $uid, $msg['seen'], strlen($msg['raw']) < 12000000)) {
+            if (store_incoming($msg['raw'], $uid, $msg['seen'], strlen($msg['raw']) < 12000000, $box)) {
                 $new++;
             }
         }
         if ($batch) {
-            meta_set('imap_last_uid', (string) $maxUid);
+            meta_set('imap_last_uid' . $sfx, (string) $maxUid);
         }
-        meta_set('imap_last_sync', (string) ms());
-        meta_set('imap_last_error', '');
+        meta_set('imap_last_sync' . $sfx, (string) ms());
+        meta_set('imap_last_error' . $sfx, '');
     } catch (Throwable $e) {
-        meta_set('imap_last_error', $e->getMessage());
+        meta_set('imap_last_error' . $sfx, $e->getMessage());
         throw $e instanceof MailException ? $e : new MailException($e->getMessage());
     } finally {
         if ($im) {
@@ -490,7 +503,7 @@ function sync_inbox(): array
     return ['new' => $new, 'skipped' => false];
 }
 
-function store_incoming(string $raw, int $uid, bool $seen, bool $complete = true): bool
+function store_incoming(string $raw, int $uid, bool $seen, bool $complete = true, int $box = 1): bool
 {
     $p = Mime::parse($raw);
     $h = $p['headers'];
@@ -515,9 +528,9 @@ function store_incoming(string $raw, int $uid, bool $seen, bool $complete = true
     $client = client_for_email($fromEmail);
     $att = $p['attachments'] ? mb_substr(implode(' | ', $p['attachments']), 0, 500) : null;
     $t = ms();
-    run('INSERT INTO emails (direction, uid, message_id, in_reply_to, from_email, from_name, reply_to, to_email, subject, body, preview, attachments, msg_date, client_id, read_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ['in', $uid, $mid, $irt, $fromEmail, mb_substr($fromName, 0, 190), $replyTo, $toEmail, $subject, $text, make_preview($text), $att, $date, $client, $seen ? $date : null, $t]);
+    run('INSERT INTO emails (direction, uid, message_id, in_reply_to, from_email, from_name, reply_to, to_email, subject, body, preview, attachments, msg_date, client_id, read_at, created_at, mailbox)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['in', $uid, $mid, $irt, $fromEmail, mb_substr($fromName, 0, 190), $replyTo, $toEmail, $subject, $text, make_preview($text), $att, $date, $client, $seen ? $date : null, $t, $box]);
     $emailId = insert_id();
     if ($complete) {
         foreach ($p['files'] as $f) {
@@ -529,7 +542,7 @@ function store_incoming(string $raw, int $uid, bool $seen, bool $complete = true
             }
         }
     }
-    if (!$seen) {
+    if (!$seen && $box === 1) { // dodatni sandučić je samo za primanje: bez automatskog odgovora
         maybe_auto_reply($h, $replyTo !== '' ? $replyTo : $fromEmail, $subject, $mid, $date, $client);
     }
     return true;
