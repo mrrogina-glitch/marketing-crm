@@ -317,3 +317,4 @@ fieldset.aud legend{font-weight:600;padding:0 6px}
 .urow .un .chip{align-self:flex-start}
 .svcbox{display:flex;flex-wrap:wrap;gap:6px 16px;padding:8px 0}
 .svcbox .chk{display:flex;align-items:center;gap:6px;font-weight:400}
+#v-aktivni .li .a small{white-space:normal;overflow:visible;text-overflow:clip}
