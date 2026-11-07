@@ -186,7 +186,7 @@ function load_attachments(array $docIds, ?int $clientId): array
  * The signature is NOT added here; callers add it with with_signature().
  * @return int id of the stored e-mail
  */
-function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false): int
+function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false, array $headers = []): int
 {
     if (!Mailer::configured()) {
         throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
@@ -198,7 +198,7 @@ function send_and_store(?array $u, string $to, string $subject, string $text, ?i
         }
     }
     $attachments = $docIds ? load_attachments($docIds, $clientId) : [];
-    $extra = $inReplyTo ? ['In-Reply-To' => $inReplyTo, 'References' => $inReplyTo] : [];
+    $extra = ($inReplyTo ? ['In-Reply-To' => $inReplyTo, 'References' => $inReplyTo] : []) + $headers;
     if ($auto) {
         $extra['Auto-Submitted'] = 'auto-replied';
         $extra['X-Auto-Response-Suppress'] = 'All';
@@ -344,10 +344,19 @@ function process_scheduled(): int
             $fail('Korisnik ili klijent više ne postoji.');
             continue;
         }
+        $foot = '';
+        $hdrs = [];
+        if ((int) $s['bulk'] === 1) {
+            if (dnc_has((string) $s['to_email'])) {
+                run("UPDATE scheduled_emails SET status = 'cancelled', error = 'Na popisu ne kontaktirati' WHERE id = ?", [$s['id']]);
+                continue;
+            }
+            [$foot, $hdrs] = bulk_footer((string) $s['to_email']);
+        }
         try {
             $docIds = array_filter(array_map('intval', explode(',', (string) $s['doc_ids'])));
-            send_and_store($u, (string) $s['to_email'], (string) $s['subject'], with_signature((string) $s['body'], $u), (int) $c['id'], null, $docIds,
-                $s['remind_days'] !== null ? (int) $s['remind_days'] : null);
+            send_and_store($u, (string) $s['to_email'], (string) $s['subject'], with_signature((string) $s['body'], $u) . $foot, (int) $c['id'], null, $docIds,
+                $s['remind_days'] !== null ? (int) $s['remind_days'] : null, false, $hdrs);
             // mark as sent first: a failure while writing the note must never cause a second send
             run("UPDATE scheduled_emails SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?", [ms(), $s['id']]);
             $sent++;
@@ -900,6 +909,11 @@ function expire_campaigns(): int
                 [$c['id'], $c['owner_id'], $lose ? 'status' : 'note', $lose ? STAGE_LABELS['aktivni'] . ' → Izgubljen' . "\n" . $why : $why, $t]);
         });
         $n++;
+        try {
+            campaign_expired_notify($c, $c['status'] === 'aktivni');
+        } catch (Throwable $e) {
+            error_log('CRM camp expire notify: ' . $e->getMessage());
+        }
     }
     return $n;
 }
@@ -919,6 +933,7 @@ function run_background_jobs(bool $force = false): array
         $out['report'] = weekly_report_if_due();
         $out['report_month'] = monthly_report_if_due();
         $out['backup'] = backup_auto_if_due();
+        $out['contact'] = contact_reminders_run();
     } catch (Throwable $e) {
         error_log('CRM jobs: ' . $e->getMessage());
         $out['error'] = $e->getMessage();
@@ -1002,9 +1017,10 @@ function campaign_recipients(array $aud): array
     }
     $seen = [];
     $out = [];
+    $dncSet = dnc_set();
     foreach (rows($sql . ' ORDER BY name', $p) as $c) {
         $mail = strtolower(trim((string) $c['email']));
-        if (!filter_var($mail, FILTER_VALIDATE_EMAIL) || isset($seen[$mail])) {
+        if (!filter_var($mail, FILTER_VALIDATE_EMAIL) || isset($seen[$mail]) || isset($dncSet[$mail])) {
             continue;
         }
         $seen[$mail] = 1;

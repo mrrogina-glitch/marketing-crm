@@ -259,10 +259,16 @@ function bulk_clients(array $u, array $aud): array
     $seen = [];
     $out = [];
     $noEmail = 0;
+    $dncN = 0;
+    $dncSet = dnc_set();
     foreach (rows($sql . ' ORDER BY name', $p) as $c) {
         $mail = strtolower(trim((string) $c['email']));
         if (!filter_var($mail, FILTER_VALIDATE_EMAIL)) {
             $noEmail++;
+            continue;
+        }
+        if (isset($dncSet[$mail])) {
+            $dncN++;
             continue;
         }
         if (isset($seen[$mail])) {
@@ -271,7 +277,7 @@ function bulk_clients(array $u, array $aud): array
         $seen[$mail] = 1;
         $out[] = $c;
     }
-    return ['clients' => $out, 'noEmail' => $noEmail];
+    return ['clients' => $out, 'noEmail' => $noEmail, 'dnc' => $dncN];
 }
 
 function bulk_pending_count(?array $u = null): int

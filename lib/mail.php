@@ -62,6 +62,12 @@ final class Mailer
                 $common[] = $h . ': ' . trim((string) $extra[$h]);
             }
         }
+        if (!empty($extra['List-Unsubscribe']) && preg_match('#^<https://[^<>\s]+>$#', trim((string) $extra['List-Unsubscribe']))) {
+            $common[] = 'List-Unsubscribe: ' . trim((string) $extra['List-Unsubscribe']);
+            if (($extra['List-Unsubscribe-Post'] ?? '') === 'List-Unsubscribe=One-Click') {
+                $common[] = 'List-Unsubscribe-Post: List-Unsubscribe=One-Click';
+            }
+        }
         $common[] = 'MIME-Version: 1.0';
 
         $body = str_replace(["\r\n", "\r"], "\n", $body);
