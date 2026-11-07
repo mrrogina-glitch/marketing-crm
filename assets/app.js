@@ -35,7 +35,9 @@ function initApp() {
   ];
   const STAGE = Object.fromEntries(STAGES.map((s) => [s.id, s]));
   const OPEN = { novi: 1, kontaktiran: 1, ponuda: 1, pregovori: 1 };
-  const SERVICES = ['Društvene mreže', 'Google Ads', 'SEO optimizacija', 'Izrada web stranice', 'Content marketing', 'E-mail marketing', 'Brendiranje i dizajn', 'Cjelovito vođenje marketinga'];
+  const SERVICES = ['Radio SPOT', 'Radio Emisija', 'PR Portali', 'Baner'];
+  const svcBox = (sel) => { const have = String(sel || '').split(',').map((x) => x.trim()); return SERVICES.map((s) => '<label class="chk"><input type="checkbox" value="' + esc(s) + '"' + (have.includes(s) ? ' checked' : '') + '> ' + esc(s) + '</label>').join(''); };
+  const svcRead = (id) => Array.from($(id).querySelectorAll('input:checked')).map((i) => i.value).join(', ');
   const TYPES = { note: 'Bilješka', call: 'Poziv', meeting: 'Sastanak', email: 'E-mail poslan', inmail: 'E-mail primljen', status: 'Status' };
   const STALE_DAYS = 14;
   const TABS = ['pregled', 'klijenti', 'aktivni', 'inbox', 'tim', 'postavke'];
@@ -688,7 +690,6 @@ function initApp() {
     S.openId = id; S.pendingStatus = null;
     const campExpired = !!c.campActive && !!c.campEnd && c.campEnd < today();
     const campHist = (S.campaigns || []).filter((x) => x.clientId === c.id);
-    const svc = SERVICES.slice(); if (c.service && !svc.includes(c.service)) svc.push(c.service);
     const ownerOpts = ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === c.ownerId ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
     let h = '<div class="sh-h"><div><h2 id="dTitle"></h2><div class="sub"><span id="dPill"></span><span id="dSub"></span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">' +
       '<div class="sec"><div class="acts"><label class="f">Status<select id="stSel">' + STAGES.map((s) => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('') + '</select></label><button class="btn" data-act="mail">Napiši e-mail</button></div>' +
@@ -704,7 +705,7 @@ function initApp() {
       '<label class="f"><span><span id="iNameL">' + (c.kind === 'osoba' ? 'Ime i prezime' : 'Naziv tvrtke') + '</span> <span class="req">*</span></span><input id="iName" value="' + esc(c.name) + '"></label>' +
       '<label class="f" id="iContactW"' + (c.kind === 'osoba' ? ' hidden' : '') + '><span>Kontakt osoba <span class="req">*</span></span><input id="iContact" value="' + esc(c.kind === 'osoba' ? '' : c.contact) + '"></label><label class="f">OIB<input id="iOib" inputmode="numeric" maxlength="11" value="' + esc(c.oib || '') + '"></label>' +
       '<label class="f">E-mail<input id="iEmail" type="email" value="' + esc(c.email) + '"></label><label class="f">Telefon<input id="iPhone" type="tel" value="' + esc(c.phone) + '"></label>' +
-      '<label class="f">Usluga<select id="iService"><option value="">–</option>' + svc.map((s) => '<option' + (s === c.service ? ' selected' : '') + '>' + esc(s) + '</option>').join('') + '</select></label>' +
+      '<div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="iService">' + svcBox(c.service) + '</div></div>' +
       '<label class="f">Vrijednost (€)<input id="iValue" type="number" min="0" step="50" value="' + esc(c.value || '') + '"></label>' +
       '<label class="f">Prodavač<select id="iOwner">' + ownerOpts + '</select></label><label class="f">Sljedeći kontakt<input id="iFollow" type="date" value="' + esc(c.nextFollowUp) + '"></label>' +
       '<div class="f wide campbox"><label class="chk"><input type="checkbox" id="iCamp"' + (c.campActive ? ' checked' : '') + '> Aktivni: klijent ima aktivnu kampanju</label>' +
@@ -799,7 +800,7 @@ function initApp() {
     if ($('iCamp').checked && $('iCampStart').value && $('iCampStart').value > $('iCampEnd').value) { $('iMsg').textContent = 'Početak kampanje ne može biti nakon datuma završetka.'; return; }
     if ($('iCamp').checked && !($('iCampValue').value !== '' && Number($('iCampValue').value) >= 0)) { $('iMsg').textContent = 'Upišite vrijednost kampanje.'; $('iCampValue').focus(); return; }
     $('iMsg').textContent = '';
-    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: $('iService').value, value: Number($('iValue').value) || 0, owner_id: $('iOwner').value, next_follow_up: $('iFollow').value, camp_active: $('iCamp').checked, camp_start: $('iCampStart').value, camp_end: $('iCampEnd').value, camp_value: Number($('iCampValue').value) || 0 }), 'Podaci spremljeni');
+    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: svcRead('iService'), value: Number($('iValue').value) || 0, owner_id: $('iOwner').value, next_follow_up: $('iFollow').value, camp_active: $('iCamp').checked, camp_start: $('iCampStart').value, camp_end: $('iCampEnd').value, camp_value: Number($('iCampValue').value) || 0 }), 'Podaci spremljeni');
     if (ok) refresh(true);
   }
   async function renewCampaign() {
@@ -834,7 +835,7 @@ function initApp() {
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
     $('nHint').hidden = !prefill; applyNewKind();
-    fillSelect($('nService'), [['', '–']].concat(SERVICES.map((s) => [s, s])), '');
+    $('nService').innerHTML = svcBox('');
     fillSelect($('nStatus'), STAGES.filter((s) => OPEN[s.id]).map((s) => [s.id, s.label]), 'novi');
     fillSelect($('nOwner'), activeUsers().map((u) => [u.id, u.name + (u.id === S.me.id ? ' (ja)' : '')]), S.me.id);
     if (prefill) { $('nEmail').value = prefill.email || ''; $('nNote').value = prefill.note || ''; }
@@ -856,7 +857,7 @@ function initApp() {
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
     m.textContent = ''; $('nSave').disabled = true;
     try {
-      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: $('nService').value, value: Number($('nValue').value) || 0, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, camp_active: $('nCamp').checked, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
+      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: svcRead('nService'), value: Number($('nValue').value) || 0, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, camp_active: $('nCamp').checked, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
       toast('Klijent spremljen');
       $('mNew').hidden = true;
       await refresh(true);
