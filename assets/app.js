@@ -151,7 +151,13 @@ function initApp() {
     else if (S.loaded && S.mail.error) h = '<div class="banner" role="status">Zadnje osvježavanje pošte nije uspjelo.' + (isAdmin() && S.mail.error !== 'error' ? ' ' + esc(S.mail.error) : '') + '</div>';
     $('banner').innerHTML = h;
   }
+  const ADMIN_TABS = ['tim', 'postavke'];
+  const tabAllowed = (t) => ADMIN_TABS.indexOf(t) < 0 || isAdmin();
   function renderTabs() {
+    if (S.loaded) {
+      ADMIN_TABS.forEach((t) => { $('t-' + t).hidden = !isAdmin(); });
+      if (!tabAllowed(S.tab)) { S.tab = 'pregled'; try { location.hash = 'pregled'; } catch (e) { /* ignore */ } }
+    }
     TABS.forEach((t) => { $('t-' + t).setAttribute('aria-selected', String(S.tab === t)); $('v-' + t).hidden = S.tab !== t; });
     const n = unreadCount(); const b = $('inboxBadge');
     b.hidden = n === 0; b.textContent = n > 99 ? '99+' : String(n);
@@ -166,7 +172,7 @@ function initApp() {
     else if (S.tab === 'postavke') { const r = $('v-postavke'); if (!r.contains(document.activeElement) || !r.innerHTML) renderSettings(); }
   }
   function setTab(t) {
-    if (TABS.indexOf(t) < 0) return;
+    if (TABS.indexOf(t) < 0 || (S.loaded && !tabAllowed(t))) return;
     S.tab = t;
     try { if (location.hash.slice(1) !== t) location.hash = t; } catch (e) { /* ignore */ }
     if (t === 'postavke') renderSettings();
@@ -929,7 +935,7 @@ function initApp() {
   });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && (!$('drawer').hidden || !$('mdrawer').hidden || !$('mNew').hidden || !$('mMail').hidden)) closeTop(); });
   $('fNew').addEventListener('submit', submitNew);
-  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== S.tab) { S.tab = h; renderAll(); } });
+  window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.includes(h) && h !== S.tab && !(S.loaded && !tabAllowed(h))) { S.tab = h; renderAll(); } });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 
   /* ---------- start ---------- */
