@@ -50,4 +50,13 @@ return [
         'initial_limit' => 150,              // koliko zadnjih poruka povući pri prvom spajanju
         'verify_peer' => true,
     ],
+
+    // Dodatni sandučić "Inbox 2": SAMO za primanje (poruke se vide u Inboxu pod "Inbox 2").
+    // Sva pošta koju aplikacija šalje i dalje odlazi isključivo s adrese marketing@vip-grupa.eu.
+    // Host, port i sigurnost preuzimaju se iz 'imap' ako ih ne upišete. Odkomentirajte i upišite korisnika i lozinku.
+    // 'imap2' => [
+    //     'user' => 'adresa@vip-grupa.eu',
+    //     'pass' => '',
+    //     'folder' => 'INBOX',
+    // ],
 ];

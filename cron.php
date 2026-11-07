@@ -23,6 +23,14 @@ try {
     }
     $r = sync_inbox();
     echo date('c') . ' nove poruke: ' . $r['new'] . ($r['skipped'] ? ' (preskočeno, sinkronizacija već traje)' : '') . "\n";
+    if (imap_cfg(2) !== null) {
+        try {
+            $r2 = sync_inbox(2);
+            echo date('c') . ' Inbox 2, nove poruke: ' . $r2['new'] . ($r2['skipped'] ? ' (preskočeno)' : '') . "\n";
+        } catch (Throwable $e) {
+            fwrite(STDERR, date('c') . ' Inbox 2 greška: ' . $e->getMessage() . "\n");
+        }
+    }
 } catch (Throwable $e) {
     fwrite(STDERR, date('c') . ' greška: ' . $e->getMessage() . "\n");
     exit(1);

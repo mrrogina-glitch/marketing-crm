@@ -141,6 +141,7 @@ function email_out(array $r): array
         'date' => (int) $r['msg_date'],
         'clientId' => $r['client_id'] !== null ? (string) $r['client_id'] : null,
         'read' => $r['read_at'] !== null,
+        'box' => (int) ($r['mailbox'] ?? 1),
     ];
 }
 
@@ -229,6 +230,9 @@ try {
             $imapOn = imap_cfg() !== null;
             $lastSync = (int) (meta_get('imap_last_sync') ?? 0);
             $lastErr = (string) (meta_get('imap_last_error') ?? '');
+            $box2 = imap_cfg(2) !== null;
+            $last2 = (int) (meta_get('imap_last_sync_2') ?? 0);
+            $err2 = (string) (meta_get('imap_last_error_2') ?? '');
             $dc = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM documents');
             $templates = array_map('template_out', rows('SELECT * FROM templates ORDER BY sort_order, id'));
             $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE status IN ('pending', 'sending') OR (status = 'failed' AND send_at > ?) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
@@ -239,7 +243,7 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$a, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '']));
+            $rev = md5(json_encode([$a, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '']));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -252,7 +256,7 @@ try {
                 'users' => $usersOut,
                 'clients' => $clients,
                 'notes' => $notes,
-                'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at FROM emails ORDER BY msg_date DESC, id DESC LIMIT 600')),
+                'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
                 'templates' => $templates,
                 'scheduled' => $scheduled,
@@ -262,6 +266,9 @@ try {
                     'enabled' => Mailer::configured(),
                     'from' => Mailer::fromEmail(),
                     'imap' => $imapOn,
+                    'imap2' => $box2,
+                    'lastSync2' => $last2,
+                    'error2' => $u['role'] === 'admin' ? $err2 : ($err2 !== '' ? 'error' : ''),
                     'lastSync' => $lastSync,
                     'error' => $u['role'] === 'admin' ? $lastErr : ($lastErr !== '' ? 'error' : ''),
                 ],
@@ -533,7 +540,15 @@ try {
                 error_log('CRM sync: ' . $e->getMessage());
                 out(['ok' => false, 'error' => $u['role'] === 'admin' ? $e->getMessage() : 'Osvježavanje pošte nije uspjelo. Obavijestite administratora.']);
             }
-            out(['ok' => true, 'new' => $r['new'], 'skipped' => $r['skipped']]);
+            $new2 = 0;
+            if (imap_cfg(2) !== null) {
+                try {
+                    $new2 = sync_inbox(2)['new'];
+                } catch (MailException $e) {
+                    error_log('CRM sync 2: ' . $e->getMessage());
+                }
+            }
+            out(['ok' => true, 'new' => $r['new'] + $new2, 'skipped' => $r['skipped']]);
         }
 
         case 'mail_test': {

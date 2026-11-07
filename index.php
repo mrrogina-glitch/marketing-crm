@@ -92,6 +92,7 @@ $v = static function (string $f): string {
         <option value="unread">Nepročitano</option>
         <option value="in">Primljeno</option>
         <option value="out">Poslano</option>
+        <option value="box2" id="optBox2" hidden>Inbox 2</option>
         <option value="nolink">Bez klijenta</option>
         <option value="sched">Zakazano slanje</option>
       </select></label>
