@@ -90,6 +90,26 @@ function f_campaign(array $in): array
     return [1, $start, $end, f_value($in['camp_value'])];
 }
 
+const SERVICE_OPTIONS = ['Radio SPOT', 'Radio Emisija', 'PR Portali', 'Baner'];
+
+/** Usluga: jedna ili više opcija, spremljeno kao "Radio SPOT, Baner". */
+function f_services($v): string
+{
+    $items = is_array($v) ? $v : explode(',', (string) $v);
+    $out = [];
+    foreach ($items as $i) {
+        $i = trim((string) $i);
+        if ($i === '') {
+            continue;
+        }
+        if (!in_array($i, SERVICE_OPTIONS, true)) {
+            throw new ApiError('Usluga nije ispravna.');
+        }
+        $out[$i] = true;
+    }
+    return implode(', ', array_filter(SERVICE_OPTIONS, static fn ($o) => isset($out[$o])));
+}
+
 function client_out(array $r): array
 {
     return [
@@ -367,7 +387,7 @@ try {
             $oib = f_oib($in);
             $email = f_email($in, 'email');
             $phone = f_str($in, 'phone', 60, 'Telefon');
-            $service = f_str($in, 'service', 120, 'Usluga');
+            $service = f_services($in['service'] ?? '');
             $value = f_value($in['value'] ?? 0);
             $status = f_status($in['status'] ?? 'novi');
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
@@ -424,7 +444,7 @@ try {
             $oib = f_oib($in);
             $email = f_email($in, 'email');
             $phone = f_str($in, 'phone', 60, 'Telefon');
-            $service = f_str($in, 'service', 120, 'Usluga');
+            $service = f_services($in['service'] ?? '');
             $value = f_value($in['value'] ?? 0);
             $owner = active_user_id($in['owner_id'] ?? null, (int) ($c['owner_id'] ?? $u['id']));
             $fu = f_date($in['next_follow_up'] ?? '');

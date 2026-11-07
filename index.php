@@ -134,7 +134,7 @@ $v = static function (string $f): string {
         <label class="f">OIB<input id="nOib" inputmode="numeric" maxlength="11" autocomplete="off" placeholder="neobavezno"></label>
         <label class="f">E-mail<input id="nEmail" type="email" autocomplete="off"></label>
         <label class="f">Telefon<input id="nPhone" type="tel" autocomplete="off"></label>
-        <label class="f">Usluga<select id="nService"></select></label>
+        <div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="nService"></div></div>
         <label class="f">Procijenjena vrijednost (€)<input id="nValue" type="number" min="0" step="50" inputmode="numeric"></label>
         <label class="f">Status<select id="nStatus"></select></label>
         <label class="f">Prodavač<select id="nOwner"></select></label>
