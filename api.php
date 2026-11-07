@@ -423,7 +423,7 @@ try {
                 $settings = ['autoreply' => $ar, 'reportEnabled' => setting_get('report_enabled', '1') === '1', 'workHours' => work_cfg()['label']];
             }
             $sig = trim((string) ($u['signature'] ?? ''));
-            $rev = md5(json_encode([$tasks, $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
+            $rev = md5(json_encode([$tasks, count(rows('SELECT id FROM owner_history')), $a, $cg, $b, $em, $dc, $usersOut, $u['role'], $u['name'], $sig, $templates, $scheduled, $reminders, $settings, Mailer::configured(), $imapOn, $lastSync, $lastErr !== '', $box2, $last2, $err2 !== '', setting_get('imap2')]));
             $base = ['rev' => $rev, 'csrf' => csrf_token()];
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
@@ -438,6 +438,7 @@ try {
                 'notes' => $notes,
                 'emails' => array_map('email_out', rows('SELECT id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'tasks' => $tasks,
+                'ownerHist' => array_map(static fn ($r) => [(string) $r['client_id'], (int) $r['from_at'], (string) $r['owner_id']], rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id')),
                 'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
                 'templates' => $templates,
@@ -484,6 +485,7 @@ try {
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE, $campV]);
                 $cid = insert_id();
+                record_owner($cid, (int) $owner, $t);
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
                 return $cid;
             });
@@ -532,6 +534,9 @@ try {
             $fu = f_date($in['next_follow_up'] ?? '');
             run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
                 [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $owner, $fu, ms(), $c['id']]);
+            if ((int) $owner !== (int) $c['owner_id']) {
+                record_owner((int) $c['id'], (int) $owner, ms());
+            }
             $newVals = ['kind' => $kind, 'name' => $name, 'contact' => $contact, 'oib' => $oib, 'email' => $email, 'phone' => $phone, 'service' => $service, 'value' => $value, 'owner_id' => $owner, 'next_follow_up' => $fu];
             if (array_key_exists('camp_active', $in)) {
                 [$campA, $campS, $campE, $campV] = f_campaign($in);
@@ -549,6 +554,25 @@ try {
             if ($diff !== '') {
                 audit((int) $c['id'], (int) $u['id'], 'update', $diff, $name);
             }
+            out(['ok' => true]);
+        }
+
+        case 'client_take': {
+            $u = need_write();
+            $in = body();
+            $c = load_client((string) ($in['id'] ?? ''));
+            if ((int) $c['owner_id'] === (int) $u['id']) {
+                throw new ApiError('Ovaj klijent je već vaš.');
+            }
+            $t = ms();
+            $from = user_name_of((int) $c['owner_id']);
+            transaction(static function () use ($c, $u, $t, $from): void {
+                run('UPDATE clients SET owner_id = ?, updated_at = ? WHERE id = ?', [$u['id'], $t, $c['id']]);
+                record_owner((int) $c['id'], (int) $u['id'], $t);
+                run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
+                    [$c['id'], $u['id'], 'note', 'Klijenta je preuzeo/la ' . $u['name'] . ' (prethodni prodavač: ' . $from . ').', $t]);
+            });
+            audit((int) $c['id'], (int) $u['id'], 'update', 'Prodavač: ' . $from . ' → ' . $u['name'] . ' (preuzimanje)', (string) $c['name']);
             out(['ok' => true]);
         }
 
