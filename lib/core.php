@@ -5,7 +5,7 @@ if (!defined('APP_ROOT')) {
     define('APP_ROOT', dirname(__DIR__));
 }
 
-const STAGES = ['novi', 'kontaktiran', 'ponuda', 'pregovori', 'dobiven', 'izgubljen'];
+const STAGES = ['novi', 'kontaktiran', 'ponuda', 'pregovori', 'aktivni', 'dobiven', 'izgubljen'];
 const NOTE_TYPES = ['note', 'call', 'meeting', 'email', 'status'];
 
 final class ApiError extends RuntimeException

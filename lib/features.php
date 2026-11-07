@@ -632,6 +632,46 @@ function monthly_report_if_due(): bool
 /* ---------- background jobs ---------- */
 
 /** Runs from cron.php and, throttled, from the app. */
+/** Moves the client's current campaign into the history (if it has dates). */
+function archive_campaign(array $c, int $userId): void
+{
+    if (empty($c['camp_end'])) {
+        return;
+    }
+    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms()]);
+}
+
+const STAGE_LABELS = ['novi' => 'Novi kontakt', 'kontaktiran' => 'Kontaktiran', 'ponuda' => 'Ponuda poslana', 'pregovori' => 'Pregovori', 'aktivni' => 'Aktivni', 'dobiven' => 'Dobiven', 'izgubljen' => 'Izgubljen'];
+
+/** Klijent s aktivnom kampanjom ima status Aktivni. */
+function mark_client_active(array $c, int $userId, int $t): void
+{
+    if ($c['status'] === 'aktivni') {
+        return;
+    }
+    run('UPDATE clients SET status = ?, updated_at = ? WHERE id = ?', ['aktivni', $t, $c['id']]);
+    run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
+        [$c['id'], $userId, 'status', STAGE_LABELS[$c['status']] . ' → Aktivni' . "\n" . 'Klijent ima aktivnu kampanju.', $t]);
+}
+
+/** Kampanje kojima je prošao datum završetka: u povijest, klijent postaje Izgubljen. */
+function expire_campaigns(): int
+{
+    $n = 0;
+    foreach (rows('SELECT * FROM clients WHERE camp_active = 1 AND camp_end IS NOT NULL AND camp_end < ?', [date('Y-m-d')]) as $c) {
+        $t = ms();
+        transaction(static function () use ($c, $t): void {
+            archive_campaign($c, (int) $c['owner_id']);
+            run('UPDATE clients SET camp_active = 0, camp_start = NULL, camp_end = NULL, camp_value = 0, status = ?, updated_at = ? WHERE id = ?', ['izgubljen', $t, $c['id']]);
+            run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
+                [$c['id'], $c['owner_id'], 'status', STAGE_LABELS[$c['status']] . ' → Izgubljen' . "\n" . 'Kampanja je završila ' . date('d.m.Y.', strtotime($c['camp_end'])) . ', vrijednost ' . number_format((float) $c['camp_value'], 2, ',', '.') . ' €.', $t]);
+        });
+        $n++;
+    }
+    return $n;
+}
+
 function run_background_jobs(bool $force = false): array
 {
     $last = (int) (meta_get('bg_last') ?? 0);
@@ -641,6 +681,7 @@ function run_background_jobs(bool $force = false): array
     meta_set('bg_last', (string) ms());
     $out = [];
     try {
+        $out['expired'] = expire_campaigns();
         $out['scheduled'] = process_scheduled();
         $out['reminders'] = notify_reminders();
         $out['report'] = weekly_report_if_due();
@@ -656,7 +697,7 @@ function run_background_jobs(bool $force = false): array
 /* ---------- templates: sending time and campaigns (akcije) ---------- */
 
 const CAMPAIGN_GROUPS = [
-    'aktivni' => ['novi', 'kontaktiran', 'ponuda', 'pregovori'],
+    'aktivni' => ['novi', 'kontaktiran', 'ponuda', 'pregovori', 'aktivni'],
     'dobiveni' => ['dobiven'],
     'neaktivni' => ['izgubljen'],
 ];
