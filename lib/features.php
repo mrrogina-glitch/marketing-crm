@@ -918,6 +918,7 @@ function run_background_jobs(bool $force = false): array
         $out['reminders'] = notify_reminders();
         $out['report'] = weekly_report_if_due();
         $out['report_month'] = monthly_report_if_due();
+        $out['backup'] = backup_auto_if_due();
     } catch (Throwable $e) {
         error_log('CRM jobs: ' . $e->getMessage());
         $out['error'] = $e->getMessage();
