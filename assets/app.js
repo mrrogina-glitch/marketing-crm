@@ -615,7 +615,7 @@ function initApp() {
   }
   function filteredClients() {
     let a = S.clients.slice(); const q = S.q.trim().toLowerCase();
-    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.phone, c.service, c.oib, c.industry].some((v) => (v || '').toLowerCase().includes(q)));
+    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.phone, c.service, c.oib, c.industry, c.address].some((v) => (v || '').toLowerCase().includes(q)));
     if (S.fStatus) a = a.filter((c) => c.status === S.fStatus);
     if (S.fOwner) a = a.filter((c) => c.ownerId === S.fOwner);
     if (S.fKind) a = a.filter((c) => (c.kind || 'tvrtka') === S.fKind);
@@ -979,16 +979,17 @@ function initApp() {
     toolModal('Uvoz klijenata iz Excela', '<p><b>' + esc(d.file) + '</b>: ' + d.total + ' redaka. Prepoznati stupci: ' + d.columns.map((c) => esc(c[1])).join(', ') + '.</p>' +
       '<div class="strip impstrip"><div><div class="k">Spremno za uvoz</div><div class="v">' + d.ok + '</div></div><div><div class="k">Duplikati</div><div class="v' + (d.dup ? ' warn' : '') + '">' + d.dup + '</div></div><div><div class="k">S greškom</div><div class="v' + (d.bad ? ' warn' : '') + '">' + d.bad + '</div></div></div>' +
       (d.bad ? '<h4>Redci s greškom (preskaču se)</h4>' + tbl(d.badRows, 'Greška') : '') + (d.dup ? '<h4>Duplikati</h4>' + tbl(d.dupRows, 'Postojeći klijent') : '') + (d.ok ? '<h4>Primjer redaka za uvoz</h4>' + tbl(d.okRows, '') : '') +
-      '<div class="row"><label class="f">Dodijeli prodavaču<select id="impOwner">' + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === S.me.id ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select></label>' +
-      '<label class="f">Duplikati<select id="impMode"><option value="skip">Preskoči duplikate (preporučeno)</option><option value="all">Uvezi i duplikate</option></select></label></div>' +
+      '<div class="row"><label class="f">Dodijeli prodavaču<select id="impOwner">' + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === S.me.id ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '<option value="none">— bez prodavača —</option></select></label>' +
+      '<label class="f">Status<select id="impStatus"><option value="">Prema datoteci (zadano: Novi)</option>' + STAGES.map((s) => '<option value="' + esc(s.id) + '">' + esc(s.label) + '</option>').join('') + '</select></label>' +
+      '<label class="f">Duplikati<select id="impMode"><option value="skip">Preskoči duplikate (preporučeno)</option><option value="oib">Preskoči samo iste OIB-ove</option><option value="all">Uvezi i duplikate</option></select></label></div>' +
       '<div class="msg" id="impMsg" role="alert"></div><div class="acts"><button class="btn primary" data-tool="impgo"' + (d.ok + d.dup ? '' : ' disabled') + '>Uvezi klijente</button><button class="btn" data-tool="impopen">Druga datoteka</button></div>');
   }
   async function impGo() {
     const d = S.imp; const mode = $('impMode').value;
-    const n = mode === 'all' ? d.ok + d.dup : d.ok;
+    const n = mode === 'all' ? d.ok + d.dup : (mode === 'oib' ? 'do ' + (d.ok + d.dup) : d.ok);
     if (!confirm('Uvesti ' + n + ' klijenata?')) return;
     try {
-      const r = await call('import_commit', { token: d.token, mode, owner_id: $('impOwner').value });
+      const r = await call('import_commit', { token: d.token, mode, status: $('impStatus').value, owner_id: $('impOwner').value });
       await refresh(true);
       toolModal('Uvoz završen', '<p>Uvezeno klijenata: <b>' + r.created + '</b>. Preskočeno duplikata: ' + r.skippedDup + '. Redaka s greškom: ' + r.skippedBad + '.</p><div class="acts"><button class="btn primary" data-tool="close">Zatvori</button></div>');
     } catch (e) { $('impMsg').textContent = e.message; }
@@ -1292,7 +1293,7 @@ function initApp() {
       '<label class="f">Vrsta klijenta<select id="iKind"><option value="tvrtka"' + (c.kind !== 'osoba' ? ' selected' : '') + '>Tvrtka</option><option value="osoba"' + (c.kind === 'osoba' ? ' selected' : '') + '>Fizička osoba</option></select></label>' +
       '<label class="f"><span><span id="iNameL">' + (c.kind === 'osoba' ? 'Ime i prezime' : 'Naziv tvrtke') + '</span> <span class="req">*</span></span><input id="iName" value="' + esc(c.name) + '"></label>' +
       '<label class="f" id="iContactW"' + (c.kind === 'osoba' ? ' hidden' : '') + '><span>Kontakt osoba <span class="req">*</span></span><input id="iContact" value="' + esc(c.kind === 'osoba' ? '' : c.contact) + '"></label><label class="f">OIB<input id="iOib" inputmode="numeric" maxlength="11" value="' + esc(c.oib || '') + '"></label>' +
-      '<label class="f">E-mail<input id="iEmail" type="email" value="' + esc(c.email) + '"></label><label class="f">Telefon<input id="iPhone" type="tel" value="' + esc(c.phone) + '"></label>' +
+      '<label class="f">E-mail<input id="iEmail" type="email" value="' + esc(c.email) + '"></label><label class="f">Telefon<input id="iPhone" type="tel" value="' + esc(c.phone) + '"></label><label class="f wide">Adresa<input id="iAddr" maxlength="255" value="' + esc(c.address || '') + '"></label>' +
       '<label class="f">Djelatnost<input id="iIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću" value="' + esc(c.industry || '') + '"></label>' +
       '<div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="iService">' + svcBox(c.service) + '</div></div>' +
       '<label class="f">Prodavač<select id="iOwner">' + ownerOpts + '</select></label>' +
@@ -1408,7 +1409,7 @@ function initApp() {
     if (email && email.indexOf('@') < 1) { $('iMsg').textContent = 'E-mail adresa nije ispravna.'; return; }
     if ($('iContract').checked && !$('iContractEnd').value) { $('iMsg').textContent = 'Odaberite datum do kada je ugovor aktivan.'; $('iContractEnd').focus(); return; }
     $('iMsg').textContent = '';
-    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), owner_id: $('iOwner').value, has_contract: $('iContract').checked, contract_end: $('iContractEnd').value }), 'Podaci spremljeni');
+    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), address: $('iAddr').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), owner_id: $('iOwner').value, has_contract: $('iContract').checked, contract_end: $('iContractEnd').value }), 'Podaci spremljeni');
     if (ok) refresh(true);
   }
   async function renewCampaign() {
