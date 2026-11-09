@@ -268,8 +268,8 @@ function migrate(PDO $pdo): void
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
         24 => [
-            "ALTER TABLE clients ADD camp_type VARCHAR(10) NOT NULL DEFAULT 'jednokratno'",
-            "ALTER TABLE campaigns ADD camp_type VARCHAR(10) NOT NULL DEFAULT 'jednokratno'",
+            "ALTER TABLE clients ADD camp_type VARCHAR(16) NOT NULL DEFAULT 'jednokratno'",
+            "ALTER TABLE campaigns ADD camp_type VARCHAR(16) NOT NULL DEFAULT 'jednokratno'",
         ],
         23 => [
             static function (PDO $pdo): void {
