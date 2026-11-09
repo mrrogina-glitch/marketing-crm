@@ -661,7 +661,7 @@ function initApp() {
     if (!a.length) h += '<div class="cnone">Nijedan klijent ne odgovara filtrima.</div>';
     h += a.map((c) => {
       const t = lastTs(c); const st = isStale(c); const du = isDue(c);
-      return '<button class="crow" data-open="' + esc(c.id) + '">' +
+      return '<button class="crow st-' + esc(c.status) + '" data-open="' + esc(c.id) + '">' +
         '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">' + (c.campType === 'godisnji' ? 'godišnji ugovor do ' : 'kampanja do ') + esc(fmtYmd(c.campEnd)) + '</span>' : '') + (c.hasContract ? ' <span class="chip ' + (c.contractEnd && c.contractEnd < today() ? 'short' : 'camp') + '">ugovor' + (c.contractEnd ? ' do ' + esc(fmtYmd(c.contractEnd)) : '') + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
         '<span class="c-svc">' + esc(c.service) + '</span><span class="c-st">' + pill(c.status) + '</span>' +
         '<span class="c-val">' + (c.value ? eur(c.value) + '<small>' + (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + '</small>' : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +

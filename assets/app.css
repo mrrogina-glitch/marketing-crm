@@ -821,3 +821,58 @@ label.f{font-size:14px;color:var(--ink)}
 @media (max-width:760px){#clTools{grid-column:1/-1}}
 html body{font-size:15.5px}
 @media (max-width:760px){html body{font-size:16px}}
+
+/* ===== v4: boje po kategorijama i obojene sjene ===== */
+:root{--c-pregled:#2563EB;--c-klijenti:#0D9488;--c-aktivni:#16A34A;--c-zadaci:#D97706;--c-inbox:#7C3AED;--c-kampanje:#DB2777;--c-tim:#4F46E5;--c-postavke:#475569}
+:root[data-theme="dark"]{--c-pregled:#60A5FA;--c-klijenti:#2DD4BF;--c-aktivni:#4ADE80;--c-zadaci:#FBBF24;--c-inbox:#A78BFA;--c-kampanje:#F472B6;--c-tim:#818CF8;--c-postavke:#94A3B8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--c-pregled:#60A5FA;--c-klijenti:#2DD4BF;--c-aktivni:#4ADE80;--c-zadaci:#FBBF24;--c-inbox:#A78BFA;--c-kampanje:#F472B6;--c-tim:#818CF8;--c-postavke:#94A3B8}}
+#v-pregled{--cat:var(--c-pregled)}#v-klijenti{--cat:var(--c-klijenti)}#v-aktivni{--cat:var(--c-aktivni)}#v-zadaci{--cat:var(--c-zadaci)}
+#v-inbox{--cat:var(--c-inbox)}#v-kampanje{--cat:var(--c-kampanje)}#v-tim{--cat:var(--c-tim)}#v-postavke{--cat:var(--c-postavke)}
+.view{--cat:var(--accent)}
+/* pozadina s blagom bojom */
+body{background:
+  radial-gradient(900px 420px at 8% -5%,color-mix(in srgb,var(--c-pregled) 13%,transparent),transparent 70%),
+  radial-gradient(800px 420px at 95% 0%,color-mix(in srgb,var(--c-kampanje) 11%,transparent),transparent 70%),
+  radial-gradient(900px 500px at 50% 105%,color-mix(in srgb,var(--c-klijenti) 11%,transparent),transparent 70%),
+  var(--bg);background-attachment:fixed}
+/* gornja traka */
+.top{border-bottom:0;box-shadow:0 6px 20px -10px color-mix(in srgb,var(--c-pregled) 40%,transparent);background:linear-gradient(180deg,var(--surface),color-mix(in srgb,var(--c-pregled) 4%,var(--surface)))}
+.top::after{content:"";display:block;height:3px;background:linear-gradient(90deg,var(--c-pregled),var(--c-klijenti),var(--c-aktivni),var(--c-zadaci),var(--c-inbox),var(--c-kampanje),var(--c-tim))}
+/* kartice-tabovi u boji svoje kategorije */
+#t-pregled{--tc:var(--c-pregled)}#t-klijenti{--tc:var(--c-klijenti)}#t-aktivni{--tc:var(--c-aktivni)}#t-zadaci{--tc:var(--c-zadaci)}
+#t-inbox{--tc:var(--c-inbox)}#t-kampanje{--tc:var(--c-kampanje)}#t-tim{--tc:var(--c-tim)}#t-postavke{--tc:var(--c-postavke)}
+.tab::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--tc,var(--accent));margin-right:7px;vertical-align:1px;opacity:.85}
+.tab:hover{color:var(--tc,var(--ink))}
+.tab[aria-selected="true"]{color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,var(--surface))!important;box-shadow:0 6px 14px -6px color-mix(in srgb,var(--tc) 55%,transparent),inset 0 0 0 1px color-mix(in srgb,var(--tc) 35%,transparent)!important}
+/* naslovi i ploče */
+.view>h2{color:var(--cat);display:inline-block;border-bottom:3px solid color-mix(in srgb,var(--cat) 45%,transparent);padding-bottom:3px}
+.panel-b{border-top:4px solid var(--cat);border-color:var(--line-2);border-top-color:var(--cat);box-shadow:0 12px 28px -14px color-mix(in srgb,var(--cat) 55%,transparent),0 2px 6px rgba(16,24,40,.06)}
+.panel-b>header{background:linear-gradient(180deg,color-mix(in srgb,var(--cat) 9%,var(--surface)),var(--surface))}
+.panel-b>header h3{color:color-mix(in srgb,var(--cat) 70%,var(--ink))}
+/* statistika po kategorijama */
+.strip>div{border:1px solid var(--line-2);border-radius:16px;background:linear-gradient(160deg,color-mix(in srgb,var(--sc,var(--cat)) 14%,var(--surface)),var(--surface) 70%);box-shadow:0 12px 24px -12px color-mix(in srgb,var(--sc,var(--cat)) 60%,transparent);border-left:5px solid var(--sc,var(--cat))}
+.strip>div:nth-child(1){--sc:#2563EB}.strip>div:nth-child(2){--sc:#D97706}.strip>div:nth-child(3){--sc:#DC2626}.strip>div:nth-child(4){--sc:#16A34A}.strip>div:nth-child(5){--sc:#7C3AED}.strip>div:nth-child(6){--sc:#0D9488}
+.strip .v{color:color-mix(in srgb,var(--sc,var(--cat)) 80%,var(--ink))}
+.strip .k{color:color-mix(in srgb,var(--sc,var(--cat)) 55%,var(--ink-2))}
+/* popis klijenata: boja prema statusu */
+.crow{border-left:5px solid var(--sx,transparent);transition:box-shadow .15s,transform .1s,background .15s}
+.crow.st-novi{--sx:var(--s-novi)}.crow.st-kontaktiran{--sx:var(--s-kontaktiran)}.crow.st-ponuda{--sx:var(--s-ponuda)}.crow.st-pregovori{--sx:var(--s-pregovori)}.crow.st-aktivni{--sx:var(--s-aktivni)}.crow.st-dobiven{--sx:var(--s-dobiven)}.crow.st-izgubljen{--sx:var(--s-izgubljen)}
+.crow{background:linear-gradient(90deg,color-mix(in srgb,var(--sx,transparent) 9%,var(--surface)),var(--surface) 38%)}
+.crow:hover{box-shadow:0 10px 22px -10px color-mix(in srgb,var(--sx,var(--accent)) 60%,transparent);transform:translateY(-1px);position:relative;z-index:1}
+.clist{border:0;background:transparent;box-shadow:none}
+/* inbox */
+.mrow{border-left:5px solid transparent}
+.mrow.unread{border-left-color:var(--c-inbox);background:linear-gradient(90deg,color-mix(in srgb,var(--c-inbox) 12%,var(--surface)),var(--surface) 45%)}
+.mrow:hover{box-shadow:0 8px 20px -10px color-mix(in srgb,var(--c-inbox) 55%,transparent)}
+.mrow.unread .dot{background:var(--c-inbox);box-shadow:0 0 0 3px color-mix(in srgb,var(--c-inbox) 25%,transparent)}
+/* gumbi */
+.btn.primary{background:linear-gradient(135deg,var(--cat,var(--accent)),color-mix(in srgb,var(--cat,var(--accent)) 60%,var(--accent-2)));border-color:transparent;color:#fff;box-shadow:0 8px 18px -8px color-mix(in srgb,var(--cat,var(--accent)) 70%,transparent)}
+.btn:hover{box-shadow:0 6px 14px -6px color-mix(in srgb,var(--cat,var(--accent)) 50%,transparent)}
+/* prozori */
+.sheet{border-top:5px solid var(--accent)}
+.sheet .sh-h{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 8%,var(--surface)),var(--surface))}
+.sheet .sec h3,.sheet .sh-b h3{color:color-mix(in srgb,var(--accent) 70%,var(--ink))}
+/* statusne oznake: jači sjaj */
+.pill{box-shadow:0 3px 8px -3px currentColor}
+.badge{box-shadow:0 3px 8px -2px color-mix(in srgb,var(--accent-2) 60%,transparent)}
+.poolbar{border-color:color-mix(in srgb,var(--c-klijenti) 45%,var(--line-2));background:color-mix(in srgb,var(--c-klijenti) 8%,var(--surface))}
