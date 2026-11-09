@@ -95,6 +95,19 @@ function f_campaign(array $in): array
     return [1, $start, $end, f_value($in['camp_value'])];
 }
 
+/** Sat sljedećeg kontakta (HH:MM) ili null. */
+function f_time($v): ?string
+{
+    $v = trim((string) $v);
+    if ($v === '') {
+        return null;
+    }
+    if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $v)) {
+        throw new ApiError('Sat sljedećeg kontakta nije ispravan.');
+    }
+    return $v;
+}
+
 const SERVICE_OPTIONS = ['Radio SPOT', 'Radio Emisija', 'PR Portali', 'Baner'];
 
 /** Usluga: jedna ili više opcija, spremljeno kao "Radio SPOT, Baner". */
@@ -132,6 +145,7 @@ function client_out(array $r): array
         'status' => (string) $r['status'],
         'ownerId' => $r['owner_id'] !== null ? (string) $r['owner_id'] : null,
         'nextFollowUp' => $r['next_follow_up'] ? (string) $r['next_follow_up'] : '',
+        'nextFollowTime' => ($r['next_follow_up'] && !empty($r['next_follow_time'])) ? (string) $r['next_follow_time'] : '',
         'campActive' => (int) ($r['camp_active'] ?? 0) === 1,
         'campStart' => !empty($r['camp_start']) ? (string) $r['camp_start'] : '',
         'campEnd' => !empty($r['camp_end']) ? (string) $r['camp_end'] : '',
@@ -621,6 +635,7 @@ try {
             $status = f_status($in['status'] ?? 'novi');
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
             $fu = f_date($in['next_follow_up'] ?? '');
+            $fut = $fu ? f_time($in['next_follow_time'] ?? '') : null;
             [$campA, $campS, $campE, $campV] = f_campaign($in);
             if ($campA === 1) {
                 $status = 'aktivni';
@@ -628,10 +643,10 @@ try {
             $note = f_text($in, 'note', 'Prva bilješka');
             $mailId = !empty($in['email_id']) ? (int) load_email((string) $in['email_id'])['id'] : null;
             $t = ms();
-            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $vkind, $status, $owner, $fu, $note, $t, $u, $campA, $campS, $campE, $campV): int {
-                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, industry, value, value_kind, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $vkind, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE, $campV]);
+            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $vkind, $status, $owner, $fu, $fut, $note, $t, $u, $campA, $campS, $campE, $campV): int {
+                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, industry, value, value_kind, status, owner_id, next_follow_up, next_follow_time, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $vkind, $status, $owner, $fu, $fut, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE, $campV]);
                 $cid = insert_id();
                 record_owner($cid, (int) $owner, $t);
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
@@ -755,7 +770,11 @@ try {
             }
             $text = f_text($in, 'text', 'Bilješka');
             $fu = f_date($in['next_follow_up'] ?? '');
+            $fut = $fu ? f_time($in['next_follow_time'] ?? '') : null;
             $t = ms();
+            if ($type === 'call') {
+                $text = 'Kontakt telefonom: ' . date('d.m.Y. H:i', intdiv($t, 1000)) . "\n" . $text;
+            }
             // vrijednost: ponuđeno ili ugovoreno (neobavezno, mijenja se samo ako je poslana)
             $setValue = array_key_exists('value', $in) && trim((string) $in['value']) !== '';
             $value = $setValue ? f_value($in['value']) : (float) $c['value'];
@@ -768,10 +787,10 @@ try {
             if (array_key_exists('camp_active', $in)) {
                 $camp = f_campaign($in);
             }
-            transaction(static function () use ($c, $u, $type, $text, $fu, $t, $valueChanged, $value, $vkind, $camp): void {
+            transaction(static function () use ($c, $u, $type, $text, $fu, $fut, $t, $valueChanged, $value, $vkind, $camp): void {
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$c['id'], $u['id'], $type, $text, $t]);
                 if ($fu) {
-                    run('UPDATE clients SET next_follow_up = ?, updated_at = ? WHERE id = ?', [$fu, $t, $c['id']]);
+                    run('UPDATE clients SET next_follow_up = ?, next_follow_time = ?, updated_at = ? WHERE id = ?', [$fu, $fut, $t, $c['id']]);
                 } else {
                     run('UPDATE clients SET updated_at = ? WHERE id = ?', [$t, $c['id']]);
                 }
@@ -791,7 +810,8 @@ try {
             });
             $new = [];
             if ($fu) {
-                $new['next_follow_up'] = $fu;
+                $new['next_follow_up'] = $fu . ($fut ? ' ' . $fut : '');
+                $c['next_follow_up'] = (string) $c['next_follow_up'] . ($c['next_follow_time'] ? ' ' . $c['next_follow_time'] : '');
             }
             if ($valueChanged) {
                 $new['value'] = $value;

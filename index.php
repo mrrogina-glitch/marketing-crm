@@ -149,6 +149,7 @@ $v = static function (string $f): string {
         <label class="f">Status<select id="nStatus"></select></label>
         <label class="f">Prodavač<select id="nOwner"></select></label>
         <label class="f">Sljedeći kontakt<input id="nFollow" type="date"></label>
+        <label class="f">Sat sljedećeg kontakta<input id="nFollowT" type="time"></label>
         <div class="f wide campbox"><label class="chk"><input type="checkbox" id="nCamp"> Aktivni: klijent ima aktivnu kampanju</label>
           <div class="grid2" id="nCampDates" hidden><label class="f">Kampanja od<input id="nCampStart" type="date"></label><label class="f">Aktivna do <span class="req">*</span><input id="nCampEnd" type="date"></label><label class="f">Vrijednost kampanje (€) <span class="req">*</span><input id="nCampValue" type="number" min="0" step="10" inputmode="decimal"></label></div></div>
         <label class="f wide"><span>Prva bilješka <span class="req">* obavezno</span></span>
