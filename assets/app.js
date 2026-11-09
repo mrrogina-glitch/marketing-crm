@@ -658,10 +658,11 @@ function initApp() {
     let a = S.emails.slice(); const q = S.iq.trim().toLowerCase();
     if (q) a = a.filter((e) => [e.fromName, e.fromEmail, e.to, e.subject, e.preview].some((v) => (v || '').toLowerCase().includes(q)));
     if (S.iFilter === 'sched') return [];
-    if (S.iFilter === 'unread') a = a.filter((e) => e.dir === 'in' && !e.read);
+    if (S.iFilter === 'all') a = a.filter((e) => e.dir === 'in'); // Sve poruke = samo primljene (poslane su pod Poslano)
+    else if (S.iFilter === 'unread') a = a.filter((e) => e.dir === 'in' && !e.read);
     else if (S.iFilter === 'in') a = a.filter((e) => e.dir === 'in');
     else if (S.iFilter === 'out') a = a.filter((e) => e.dir === 'out');
-    else if (S.iFilter === 'box2') a = a.filter((e) => e.box === 2);
+    else if (S.iFilter === 'box2') a = a.filter((e) => e.box === 2 && e.dir === 'in');
     else if (S.iFilter === 'box1') a = a.filter((e) => e.box !== 2 && e.dir === 'in');
     else if (S.iFilter === 'nolink') a = a.filter((e) => !e.clientId);
     return a;
