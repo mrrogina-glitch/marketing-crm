@@ -1137,8 +1137,29 @@ try {
         }
 
         case 'email_reply': {
-            $u = need_write();
-            $in = body();
+            if (stripos((string) ($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') === 0) {
+                if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+                    throw new ApiError('Metoda nije dopuštena.', 405);
+                }
+                $u = need_user();
+                if (!csrf_ok()) {
+                    throw new ApiError('Sigurnosna provjera nije uspjela. Osvježite stranicu.', 403);
+                }
+            } else {
+                $u = need_write();
+            }
+            if (isset($_POST['data'])) {
+                $in = json_decode((string) $_POST['data'], true);
+                if (!is_array($in)) {
+                    throw new ApiError('Neispravan zahtjev.');
+                }
+            } else {
+                if (!$_POST && !$_FILES && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 && str_contains((string) ($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart')) {
+                    throw new ApiError('Privici su preveliki za ovaj poslužitelj.', 413);
+                }
+                $in = body();
+            }
+            $files = uploaded_attachments('files');
             $orig = load_email((string) ($in['email_id'] ?? ''));
             if ($orig['direction'] === 'in') {
                 $to = (string) ($orig['reply_to'] !== '' ? $orig['reply_to'] : $orig['from_email']);
@@ -1165,7 +1186,7 @@ try {
                 . implode("\n", array_map(static fn ($l) => '> ' . $l, $quoted));
             $cid = $orig['client_id'] !== null ? (int) $orig['client_id'] : null;
             $docIds = is_array($in['doc_ids'] ?? null) ? array_map('intval', $in['doc_ids']) : [];
-            send_and_store($u, $to, mb_substr($subject, 0, 255), $full, $cid, '<' . $orig['message_id'] . '>', $cid ? $docIds : [], null, false, [], (int) ($orig['mailbox'] ?? 1) === 2 ? 2 : 1);
+            send_and_store($u, $to, mb_substr($subject, 0, 255), $full, $cid, '<' . $orig['message_id'] . '>', $cid ? $docIds : [], null, false, [], (int) ($orig['mailbox'] ?? 1) === 2 ? 2 : 1, $files);
             $t = ms();
             transaction(static function () use ($orig, $cid, $u, $to, $subject, $text, $t): void {
                 run('UPDATE emails SET read_at = COALESCE(read_at, ?) WHERE id = ?', [$t, $orig['id']]);
