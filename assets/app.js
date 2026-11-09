@@ -76,7 +76,7 @@ function initApp() {
     me: { id: '', name: '', email: '', role: 'sales' }, users: [], usersById: {},
     clients: [], campaigns: [], tasks: [], revenue: null, revPeriod: 'weekly', revUser: '', audit: null, notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '', imap2Cfg: null },
     byClient: new Map(), clientsById: new Map(), inByClient: new Map(),
-    tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', sort: 'activity', iq: '', iFilter: 'all', period: '7',
+    tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', fIndustry: '', sort: 'activity', iq: '', iFilter: 'all', period: '7',
     openId: null, pendingStatus: null, mailClient: null, mailDocs: new Set(), nFromMail: null, nGuess: '', reportText: '', openMailId: null, lastFocus: null, refreshing: false, syncing: false,
   };
 
@@ -486,12 +486,18 @@ function initApp() {
     S.users.filter((u) => u.active || S.clients.some((c) => c.ownerId === u.id)).forEach((u) => a.push([u.id, u.name + (u.id === S.me.id ? ' (ja)' : '')]));
     return a;
   }
+  function industryList() {
+    const m = new Map();
+    (S.clients || []).forEach((c) => { const v = (c.industry || '').trim(); if (v && !m.has(v.toLowerCase())) m.set(v.toLowerCase(), v); });
+    return Array.from(m.values()).sort((a, b) => a.localeCompare(b, 'hr'));
+  }
   function filteredClients() {
     let a = S.clients.slice(); const q = S.q.trim().toLowerCase();
-    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.phone, c.service, c.oib].some((v) => (v || '').toLowerCase().includes(q)));
+    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.phone, c.service, c.oib, c.industry].some((v) => (v || '').toLowerCase().includes(q)));
     if (S.fStatus) a = a.filter((c) => c.status === S.fStatus);
     if (S.fOwner) a = a.filter((c) => c.ownerId === S.fOwner);
     if (S.fKind) a = a.filter((c) => (c.kind || 'tvrtka') === S.fKind);
+    if (S.fIndustry) a = a.filter((c) => (S.fIndustry === '__none' ? !c.industry : (c.industry || '').toLowerCase() === S.fIndustry.toLowerCase()));
     a.sort((x, y) => {
       if (S.sort === 'name') return (x.name || '').localeCompare(y.name || '', 'hr');
       if (S.sort === 'value') return (y.value || 0) - (x.value || 0);
@@ -504,6 +510,10 @@ function initApp() {
     clientTools();
     fillSelect($('fStatus'), [['', 'Svi statusi']].concat(STAGES.map((s) => [s.id, s.label])), S.fStatus);
     fillSelect($('fOwner'), ownerOptions(['', 'Svi prodavači']), S.fOwner);
+    const inds = industryList();
+    if (S.fIndustry && S.fIndustry !== '__none' && !inds.some((x) => x.toLowerCase() === S.fIndustry.toLowerCase())) S.fIndustry = '';
+    fillSelect($('fIndustry'), [['', 'Sve djelatnosti'], ['__none', '(bez djelatnosti)']].concat(inds.map((x) => [x, x])), S.fIndustry);
+    $('industryList').innerHTML = inds.map((x) => '<option value="' + esc(x) + '"></option>').join('');
     const box = $('clist');
     if (!S.loaded) { box.innerHTML = '<div class="cnone">Učitavanje…</div>'; return; }
     if (!S.clients.length) { box.innerHTML = emptyHtml(); $('fCount').textContent = ''; return; }
@@ -514,7 +524,7 @@ function initApp() {
     h += a.map((c) => {
       const t = lastTs(c); const st = isStale(c); const du = isDue(c);
       return '<button class="crow" data-open="' + esc(c.id) + '">' +
-        '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">kampanja do ' + esc(fmtYmd(c.campEnd)) + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + '</small></span>' +
+        '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">kampanja do ' + esc(fmtYmd(c.campEnd)) + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
         '<span class="c-svc">' + esc(c.service) + '</span><span class="c-st">' + pill(c.status) + '</span>' +
         '<span class="c-val">' + (c.value ? eur(c.value) : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +
         '<span class="c-note' + (st ? ' flag-stale' : '') + '" data-l="Zadnji kontakt:">' + esc(t ? rel(t) : 'nema bilješki') + '</span>' +
@@ -1100,6 +1110,7 @@ function initApp() {
       '<label class="f"><span><span id="iNameL">' + (c.kind === 'osoba' ? 'Ime i prezime' : 'Naziv tvrtke') + '</span> <span class="req">*</span></span><input id="iName" value="' + esc(c.name) + '"></label>' +
       '<label class="f" id="iContactW"' + (c.kind === 'osoba' ? ' hidden' : '') + '><span>Kontakt osoba <span class="req">*</span></span><input id="iContact" value="' + esc(c.kind === 'osoba' ? '' : c.contact) + '"></label><label class="f">OIB<input id="iOib" inputmode="numeric" maxlength="11" value="' + esc(c.oib || '') + '"></label>' +
       '<label class="f">E-mail<input id="iEmail" type="email" value="' + esc(c.email) + '"></label><label class="f">Telefon<input id="iPhone" type="tel" value="' + esc(c.phone) + '"></label>' +
+      '<label class="f">Djelatnost<input id="iIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću" value="' + esc(c.industry || '') + '"></label>' +
       '<div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="iService">' + svcBox(c.service) + '</div></div>' +
       '<label class="f">Vrijednost (€)<input id="iValue" type="number" min="0" step="50" value="' + esc(c.value || '') + '"></label>' +
       '<label class="f">Prodavač<select id="iOwner">' + ownerOpts + '</select></label><label class="f">Sljedeći kontakt<input id="iFollow" type="date" value="' + esc(c.nextFollowUp) + '"></label>' +
@@ -1122,7 +1133,7 @@ function initApp() {
     if (!c) { closeAll(); toast('Klijent je obrisan.'); return; }
     $('dTitle').textContent = c.name;
     $('dPill').innerHTML = pill(c.status);
-    $('dSub').textContent = (c.kind === 'osoba' ? 'Fizička osoba' : (c.contact || '')) + ' · Prodavač: ' + person(c.ownerId);
+    $('dSub').textContent = (c.kind === 'osoba' ? 'Fizička osoba' : (c.contact || '')) + (c.industry ? ' · ' + c.industry : '') + ' · Prodavač: ' + person(c.ownerId);
     const docs = (S.docsByClient && S.docsByClient.get(c.id)) || [];
     $('docCount').textContent = docs.length ? docs.length + ' ' + plural(docs.length, 'datoteka', 'datoteka') : '';
     $('docList').innerHTML = docs.length ? docs.map((d) => '<li><a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a><span class="hint">' + esc(fmtSize(d.size)) + ' · ' + fmtDate(d.createdAt) + (d.emailId ? ' · iz e-maila' : '') + '</span>' +
@@ -1200,7 +1211,7 @@ function initApp() {
     if ($('iCamp').checked && $('iCampStart').value && $('iCampStart').value > $('iCampEnd').value) { $('iMsg').textContent = 'Početak kampanje ne može biti nakon datuma završetka.'; return; }
     if ($('iCamp').checked && !($('iCampValue').value !== '' && Number($('iCampValue').value) >= 0)) { $('iMsg').textContent = 'Upišite vrijednost kampanje.'; $('iCampValue').focus(); return; }
     $('iMsg').textContent = '';
-    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: svcRead('iService'), value: Number($('iValue').value) || 0, owner_id: $('iOwner').value, next_follow_up: $('iFollow').value, camp_active: $('iCamp').checked, camp_start: $('iCampStart').value, camp_end: $('iCampEnd').value, camp_value: Number($('iCampValue').value) || 0 }), 'Podaci spremljeni');
+    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), value: Number($('iValue').value) || 0, owner_id: $('iOwner').value, next_follow_up: $('iFollow').value, camp_active: $('iCamp').checked, camp_start: $('iCampStart').value, camp_end: $('iCampEnd').value, camp_value: Number($('iCampValue').value) || 0 }), 'Podaci spremljeni');
     if (ok) refresh(true);
   }
   async function renewCampaign() {
@@ -1230,7 +1241,7 @@ function initApp() {
   }
   function openNew(prefill) {
     S.lastFocus = document.activeElement;
-    ['nName', 'nContact', 'nOib', 'nEmail', 'nPhone', 'nValue', 'nFollow', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
+    ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nPhone', 'nValue', 'nFollow', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
     $('nCamp').checked = false; $('nCampDates').hidden = true;
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
@@ -1257,7 +1268,7 @@ function initApp() {
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
     m.textContent = ''; $('nSave').disabled = true;
     try {
-      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: svcRead('nService'), value: Number($('nValue').value) || 0, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, camp_active: $('nCamp').checked, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
+      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, camp_active: $('nCamp').checked, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
       toast('Klijent spremljen');
       $('mNew').hidden = true;
       await refresh(true);
@@ -1664,6 +1675,7 @@ function initApp() {
     else if (id === 'fStatus') { S.fStatus = ev.target.value; renderClients(); }
     else if (id === 'fOwner') { S.fOwner = ev.target.value; renderClients(); }
     else if (id === 'fKind') { S.fKind = ev.target.value; renderClients(); }
+    else if (id === 'fIndustry') { S.fIndustry = ev.target.value; renderClients(); }
     else if (id === 'stPeriod') { S.stIdx = Number(ev.target.value); renderOverview(); }
     else if (id === 'revUser') { S.revUser = ev.target.value; renderRevenue(); }
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
