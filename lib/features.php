@@ -1107,3 +1107,58 @@ function email_list_out(array $rowsIn): array
     }
     return $out;
 }
+
+
+/* ---------- statistika po korisniku: pozivi, odgovori, vrijeme u aplikaciji ---------- */
+
+/** Otvorena aplikacija javlja se svakih ~45 s; razmak do 150 s računa se kao rad u aplikaciji. */
+function presence_ping(int $uid): void
+{
+    $k = 'ping_' . $uid;
+    $now = ms();
+    $last = (int) (meta_get($k) ?? 0);
+    $delta = $now - $last;
+    meta_set($k, (string) $now);
+    if ($last <= 0 || $delta <= 0 || $delta > 150000) {
+        return;
+    }
+    $secs = intdiv($delta, 1000);
+    $day = date('Y-m-d');
+    if (row('SELECT user_id FROM user_presence WHERE user_id = ? AND day = ?', [$uid, $day])) {
+        run('UPDATE user_presence SET secs = secs + ? WHERE user_id = ? AND day = ?', [$secs, $uid, $day]);
+    } else {
+        run('INSERT INTO user_presence (user_id, day, secs) VALUES (?, ?, ?)', [$uid, $day, $secs]);
+    }
+}
+
+/**
+ * Brojke po korisniku za razdoblje [$from, $to) (datumi Y-m-d).
+ * Administrator vidi sve korisnike, ostali samo sebe.
+ * @return list<array{id:string,calls:int,replies:int,loginSecs:int}>
+ */
+function user_stats(array $u, string $from, string $to): array
+{
+    $f = (int) (strtotime($from . ' 00:00:00') * 1000);
+    $t = (int) (strtotime($to . ' 00:00:00') * 1000);
+    $calls = [];
+    foreach (rows("SELECT author_id, COUNT(*) AS c FROM notes WHERE type = 'call' AND created_at >= ? AND created_at < ? GROUP BY author_id", [$f, $t]) as $r) {
+        $calls[(int) $r['author_id']] = (int) $r['c'];
+    }
+    $rep = [];
+    foreach (rows("SELECT user_id, COUNT(*) AS c FROM emails WHERE direction = 'out' AND auto = 0 AND user_id IS NOT NULL AND in_reply_to IS NOT NULL AND in_reply_to <> '' AND deleted_at IS NULL AND msg_date >= ? AND msg_date < ? GROUP BY user_id", [$f, $t]) as $r) {
+        $rep[(int) $r['user_id']] = (int) $r['c'];
+    }
+    $login = [];
+    foreach (rows('SELECT user_id, SUM(secs) AS s FROM user_presence WHERE day >= ? AND day < ? GROUP BY user_id', [$from, $to]) as $r) {
+        $login[(int) $r['user_id']] = (int) $r['s'];
+    }
+    $out = [];
+    foreach (rows('SELECT id FROM users ORDER BY id') as $r) {
+        $id = (int) $r['id'];
+        if ($u['role'] !== 'admin' && $id !== (int) $u['id']) {
+            continue;
+        }
+        $out[] = ['id' => (string) $id, 'calls' => $calls[$id] ?? 0, 'replies' => $rep[$id] ?? 0, 'loginSecs' => $login[$id] ?? 0];
+    }
+    return $out;
+}
