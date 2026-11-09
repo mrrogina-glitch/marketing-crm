@@ -379,15 +379,20 @@ function initApp() {
     }
     return out;
   }
-  /* ---------- statistika po korisniku (Tijek prodaje) ---------- */
+  /* ---------- statistika po korisniku (Tijek prodaje): tekući tjedan u odnosu na prošli ---------- */
   const stageByLabel = Object.fromEntries(STAGES.map((s) => [s.label, s.id]));
-  function pipeStats() {
-    const kind = S.stKind || 'weekly'; const per = revPeriods(kind, 12); const idx = Math.min(S.stIdx || 0, per.length - 1); const p = per[idx];
-    let from, to;
-    if (kind === 'weekly') { from = new Date(p.key + 'T00:00:00'); to = new Date(from); to.setDate(to.getDate() + 7); }
-    else { const [y, m] = p.key.split('-').map(Number); from = new Date(y, m - 1, 1); to = new Date(y, m, 1); }
-    const f = from.getTime(), t = to.getTime();
-    const users = isAdmin() ? S.users.filter((u) => u.active || S.clients.some((c) => c.ownerId === u.id)) : S.users.filter((u) => u.id === S.me.id);
+  const fmtHM = (secs) => { const m = Math.round((secs || 0) / 60); return Math.floor(m / 60) + ' h ' + pad(m % 60) + ' min'; };
+  const weekRange = (back) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 * back); const e = new Date(d); e.setDate(d.getDate() + 7); return { from: ymd(d), to: ymd(e) }; };
+  function loadUserStats(from, to, cb) {
+    const key = from + '|' + to; S.ustats = S.ustats || {};
+    const hit = S.ustats[key];
+    if (hit && hit.data && Date.now() - hit.at < 60000) return hit.data;
+    if (hit && hit.busy) return hit.data || null;
+    S.ustats[key] = { busy: true, at: hit ? hit.at : 0, data: hit ? hit.data : null };
+    call('user_stats&from=' + from + '&to=' + to, null, 'GET').then((r) => { S.ustats[key] = { data: r.users, at: Date.now() }; if (cb) cb(); }).catch(() => { S.ustats[key] = { data: null, at: Date.now() }; });
+    return S.ustats[key].data;
+  }
+  function pipeCalc(f, t, users) {
     const stat = {}; users.forEach((u) => { stat[u.id] = { n: 0, mv: {}, wonV: 0 }; });
     S.clients.forEach((c) => { const o = ownerAt(c, c.createdAt); if (stat[o] && c.createdAt >= f && c.createdAt < t) stat[o].n++; });
     S.notes.forEach((n) => {
@@ -397,14 +402,42 @@ function initApp() {
       stat[ow].mv[st] = (stat[ow].mv[st] || 0) + 1;
       if (st === 'dobiven') stat[ow].wonV += c.value || 0;
     });
+    return stat;
+  }
+  function trend(cur, prev, fmt, lowerBetter) {
+    const d = cur - prev; const f = fmt || String;
+    if (d === 0) return cur === 0 ? '' : '<small class="tr eq">= kao prošli tjedan</small>';
+    const good = lowerBetter ? d < 0 : d > 0;
+    const pct = prev > 0 ? ' (' + (d > 0 ? '+' : '') + Math.round(d / prev * 100) + '%)' : '';
+    return '<small class="tr ' + (good ? 'up' : 'down') + '">' + (d > 0 ? '▲ rast ' : '▼ pad ') + esc(f(Math.abs(d))) + esc(pct) + '</small>';
+  }
+  function pipeStats() {
+    const w0 = weekRange(0), w1 = weekRange(1);
+    const users = isAdmin() ? S.users.filter((u) => u.active || S.clients.some((c) => c.ownerId === u.id)) : S.users.filter((u) => u.id === S.me.id);
+    const t = (x) => new Date(x + 'T00:00:00').getTime();
+    const cur = pipeCalc(t(w0.from), t(w0.to), users), prv = pipeCalc(t(w1.from), t(w1.to), users);
+    const redraw = () => { if (S.tab === 'pregled') renderOverview(); };
+    const us0 = loadUserStats(w0.from, w0.to, redraw), us1 = loadUserStats(w1.from, w1.to, redraw);
+    const ready = !!(us0 && us1);
+    const ux = (arr, id) => (arr || []).find((x) => x.id === id) || { calls: 0, replies: 0, loginSecs: 0 };
     const cols = ['kontaktiran', 'ponuda', 'pregovori', 'aktivni', 'dobiven', 'izgubljen'];
-    const tot = { n: 0, mv: {}, wonV: 0 }; Object.values(stat).forEach((x) => { tot.n += x.n; tot.wonV += x.wonV; cols.forEach((k) => { tot.mv[k] = (tot.mv[k] || 0) + (x.mv[k] || 0); }); });
-    const row = (name, x, b) => '<tr' + (b ? ' class="tot"' : '') + '><th>' + esc(name) + '</th><td class="nums">' + x.n + '</td>' + cols.map((k) => '<td class="nums">' + (x.mv[k] || 0) + (k === 'dobiven' && x.wonV ? ' <small>(' + eur(x.wonV) + ')</small>' : '') + '</td>').join('') + '</tr>';
-    return '<div class="pstats"><div class="revbar"><h4>Statistika po korisniku</h4><div class="seg"><button class="' + (kind === 'weekly' ? 'on' : '') + '" data-act="stper" data-v="weekly">Tjedno</button><button class="' + (kind === 'monthly' ? 'on' : '') + '" data-act="stper" data-v="monthly">Mjesečno</button></div>' +
-      '<label class="f inl">' + (kind === 'weekly' ? 'Tjedan' : 'Mjesec') + '<select id="stPeriod">' + per.map((x, i) => '<option value="' + i + '"' + (i === idx ? ' selected' : '') + '>' + esc(x.label) + (i === 0 ? ' (tekući)' : '') + '</option>').join('') + '</select></label></div>' +
-      '<div class="tblwrap"><table class="rev"><thead><tr><th>Prodavač</th><th>Novi klijenti</th>' + cols.map((k) => '<th>' + esc(STAGE[k].label) + '</th>').join('') + '</tr></thead><tbody>' +
-      users.map((u) => row(u.name, stat[u.id])).join('') + '</tbody>' + (isAdmin() && users.length > 1 ? '<tfoot>' + row('Ukupno', tot, true) + '</tfoot>' : '') + '</table></div>' +
-      '<p class="muted pad small">Brojevi pokazuju koliko je klijenata prešlo u pojedini status u odabranom razdoblju; prodaja se računa prodavaču koji je vodio klijenta u trenutku promjene.</p></div>';
+    const mk = (u) => {
+      const c = cur[u.id], p = prv[u.id], a = ux(us0, u.id), b = ux(us1, u.id);
+      return { n: c.n, pn: p.n, calls: a.calls, pcalls: b.calls, rep: a.replies, prep: b.replies, login: a.loginSecs, plogin: b.loginSecs, mv: c.mv, pmv: p.mv, wonV: c.wonV };
+    };
+    const rowsD = users.map((u) => [u, mk(u)]);
+    const tot = { n: 0, pn: 0, calls: 0, pcalls: 0, rep: 0, prep: 0, login: 0, plogin: 0, mv: {}, pmv: {}, wonV: 0 };
+    rowsD.forEach(([, x]) => { ['n', 'pn', 'calls', 'pcalls', 'rep', 'prep', 'login', 'plogin', 'wonV'].forEach((k) => { tot[k] += x[k]; }); cols.forEach((k) => { tot.mv[k] = (tot.mv[k] || 0) + (x.mv[k] || 0); tot.pmv[k] = (tot.pmv[k] || 0) + (x.pmv[k] || 0); }); });
+    const cell = (v, pv, fmt, lower) => '<td class="nums">' + (fmt ? fmt(v) : v) + '<br>' + trend(v, pv, fmt, lower) + '</td>';
+    const dash = '<td class="nums muted">…</td>';
+    const row = (name, x, b) => '<tr' + (b ? ' class="tot"' : '') + '><th>' + esc(name) + '</th>' + cell(x.n, x.pn) +
+      (ready ? cell(x.calls, x.pcalls) + cell(x.rep, x.prep) + cell(x.login, x.plogin, fmtHM) : dash + dash + dash) +
+      cols.map((k) => '<td class="nums">' + (x.mv[k] || 0) + (k === 'dobiven' && x.wonV ? ' <small>(' + eur(x.wonV) + ')</small>' : '') + '<br>' + trend(x.mv[k] || 0, x.pmv[k] || 0, null, k === 'izgubljen') + '</td>').join('') + '</tr>';
+    const lab = (r) => fmtYmd(r.from) + ' – ' + fmtYmd(ymd(new Date(new Date(r.to + 'T12:00:00').getTime() - 864e5)));
+    return '<div class="pstats"><div class="revbar"><h4>Statistika po korisniku</h4><span class="muted">tekući tjedan (' + esc(lab(w0)) + ') u odnosu na prošli tjedan (' + esc(lab(w1)) + ')</span></div>' +
+      '<div class="tblwrap"><table class="rev"><thead><tr><th>Prodavač</th><th>Novi klijenti</th><th>Telefonski pozivi</th><th>Odgovoreni e-mailovi</th><th>Vrijeme u aplikaciji</th>' + cols.map((k) => '<th>' + esc(STAGE[k].label) + '</th>').join('') + '</tr></thead><tbody>' +
+      rowsD.map(([u, x]) => row(u.name, x)).join('') + '</tbody>' + (isAdmin() && users.length > 1 ? '<tfoot>' + row('Ukupno', tot, true) + '</tfoot>' : '') + '</table></div>' +
+      '<p class="muted pad small">Prikazan je tekući tjedan (od ponedjeljka do danas) i usporedba s cijelim prošlim tjednom. Statusi pokazuju koliko je klijenata prešlo u pojedini status; prodaja se računa prodavaču koji je vodio klijenta u trenutku promjene. Vrijeme u aplikaciji računa se dok je aplikacija otvorena i prijavljena. Ostalu statistiku za bilo koje razdoblje administrator bira u kartici Tim.</p></div>';
   }
   async function loadRevenue(force) {
     if (S.revBusy || (!force && S.revenue && Date.now() - S.revAt < 30000)) return;
@@ -625,10 +658,12 @@ function initApp() {
     let a = S.emails.slice(); const q = S.iq.trim().toLowerCase();
     if (q) a = a.filter((e) => [e.fromName, e.fromEmail, e.to, e.subject, e.preview].some((v) => (v || '').toLowerCase().includes(q)));
     if (S.iFilter === 'sched') return [];
-    if (S.iFilter === 'unread') a = a.filter((e) => e.dir === 'in' && !e.read);
+    if (S.iFilter === 'all') a = a.filter((e) => e.dir === 'in'); // Sve poruke = samo primljene (poslane su pod Poslano)
+    else if (S.iFilter === 'unread') a = a.filter((e) => e.dir === 'in' && !e.read);
     else if (S.iFilter === 'in') a = a.filter((e) => e.dir === 'in');
     else if (S.iFilter === 'out') a = a.filter((e) => e.dir === 'out');
-    else if (S.iFilter === 'box2') a = a.filter((e) => e.box === 2);
+    else if (S.iFilter === 'box2') a = a.filter((e) => e.box === 2 && e.dir === 'in');
+    else if (S.iFilter === 'box1') a = a.filter((e) => e.box !== 2 && e.dir === 'in');
     else if (S.iFilter === 'nolink') a = a.filter((e) => !e.clientId);
     return a;
   }
@@ -647,7 +682,7 @@ function initApp() {
     const box = $('ilist');
     $('btnSync').disabled = !S.mail.imap || S.syncing;
     $('btnSync').textContent = S.syncing ? 'Osvježavam…' : 'Osvježi poštu';
-    $('optBox2').hidden = !S.mail.imap2;
+    $('optBox2').hidden = !S.mail.imap2; $('optBox1').hidden = !S.mail.imap2;
     $('syncInfo').textContent = S.mail.imap ? 'Zadnje osvježeno: ' + minAgo(S.mail.lastSync) : 'Primanje pošte nije podešeno.';
     if (!S.loaded) { box.innerHTML = '<div class="cnone">Učitavanje…</div>'; return; }
     if (S.iFilter === 'sched') { renderScheduled(box); return; }
@@ -663,7 +698,7 @@ function initApp() {
       const rb = e.dir === 'in' && e.repliedBy ? person(e.repliedBy) : '';
       return '<button class="mrow' + (unread ? ' unread' : '') + (rb ? ' replied' : '') + '" data-mail="' + esc(e.id) + '"><span class="dot"></span>' +
         '<span class="m-body"><span class="m-from">' + esc(who) + '</span>' + (e.dir === 'in' && e.to ? '<span class="m-to">Primljeno na: ' + esc(e.to) + '</span>' : '') + '<span class="m-subj">' + esc(e.subject || '(bez predmeta)') + (e.att ? ' · privitak' : '') + '</span><span class="m-prev">' + esc(e.preview) + '</span></span>' +
-        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : '') + '</span></button>';
+        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : (e.dir === 'in' && S.mail.imap2 ? '<span class="chip">Inbox 1</span>' : '')) + '</span></button>';
     }).join('');
   }
   async function syncInbox(force, quiet) {
@@ -691,7 +726,7 @@ function initApp() {
     renderTabs(); if (S.tab === 'inbox') renderInbox();
     const c = e.clientId ? byId(e.clientId) : null;
     const incoming = e.dir === 'in';
-    let h = '<div class="sh-h"><div><h2 id="rSubject">' + esc(e.subject || '(bez predmeta)') + '</h2><div class="sub"><span>' + esc(incoming ? 'Primljeno' : 'Poslano') + (e.box === 2 ? ' · Inbox 2' : '') + '</span><span class="nums">' + fmtDate(e.date) + ' ' + fmtTime(e.date) + '</span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">';
+    let h = '<div class="sh-h"><div><h2 id="rSubject">' + esc(e.subject || '(bez predmeta)') + '</h2><div class="sub"><span>' + esc(incoming ? 'Primljeno' : 'Poslano') + (e.box === 2 ? ' · Inbox 2' : (incoming && S.mail.imap2 ? ' · Inbox 1' : '')) + '</span><span class="nums">' + fmtDate(e.date) + ' ' + fmtTime(e.date) + '</span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">';
     h += '<dl class="meta-grid"><dt>Od</dt><dd>' + esc((e.fromName ? e.fromName + ' ' : '') + '<' + e.fromEmail + '>') + '</dd><dt>' + (incoming ? 'Primljeno na' : 'Za') + '</dt><dd>' + esc(e.to) + '</dd>' +
       (e.att ? '<dt>Privitak</dt><dd>' + ((e.docs && e.docs.length) ? e.docs.map((d) => '<a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a> <span class="hint">' + esc(fmtSize(d.size)) + '</span>').join('<br>') : esc(e.att) + ' <span class="hint">(datoteka nije spremljena, vidi se u webmailu)</span>') + '</dd>' : '') + '</dl>';
     h += '<div class="sec"><h3>Klijent</h3>';
@@ -706,15 +741,16 @@ function initApp() {
     {
       const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
       h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose"><textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
-        '<p class="hint">Odgovor odlazi s adrese ' + esc(S.mail.from) + ' na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
+        '<p class="hint">Odgovor odlazi s adrese ' + esc(e.box === 2 && S.mail.from2 ? S.mail.from2 : S.mail.from) + ' (sandučić na koji je poruka stigla) na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
     }
     h += '</div>';
     sh.innerHTML = h;
   }
   async function deleteMail(id) {
     if (!confirm('Obrisati ovu poruku iz aplikacije? Radnja se ne može poništiti.')) return;
-    const ok = await safe(() => call('email_delete', { id }), 'Poruka obrisana');
-    if (ok) { S.emails = S.emails.filter((x) => x.id !== id); closeTop(); await refresh(true); }
+    let srv = '';
+    const ok = await safe(async () => { const r = await call('email_delete', { id }); srv = r.server || ''; return r; }, '');
+    if (ok) { toast(srv === 'moved' ? 'Poruka obrisana i premještena u smeće na poslužitelju' : (srv === 'error' ? 'Poruka obrisana u aplikaciji, ali premještanje u smeće na poslužitelju nije uspjelo' : (srv === 'notfound' ? 'Poruka obrisana (na poslužitelju nije pronađena)' : 'Poruka obrisana')), srv === 'error'); S.emails = S.emails.filter((x) => x.id !== id); closeTop(); await refresh(true); }
   }
   async function sendReply(id) {
     const ta = $('rBody'); const body = ta.value.trim();
@@ -725,27 +761,47 @@ function initApp() {
   }
 
   /* ---------- team ---------- */
+  /* razdoblje u kartici Tim: brzi odabiri ili ručno od–do (samo datumi) */
+  function teamRange() {
+    const today0 = new Date(); today0.setHours(12, 0, 0, 0);
+    const p = S.period; let from, to; // to = zadnji dan uključivo
+    if (p === 'custom' && S.tmFrom && S.tmTo && S.tmFrom <= S.tmTo) { from = S.tmFrom; to = S.tmTo; }
+    else if (p === 'week') { const r = weekRange(0); from = r.from; to = ymd(today0); }
+    else if (p === 'lastweek') { const r = weekRange(1); from = r.from; to = ymd(new Date(new Date(r.to + 'T12:00:00').getTime() - 864e5)); }
+    else if (p === 'month') { from = ymd(new Date(today0.getFullYear(), today0.getMonth(), 1, 12)); to = ymd(today0); }
+    else if (p === 'lastmonth') { from = ymd(new Date(today0.getFullYear(), today0.getMonth() - 1, 1, 12)); to = ymd(new Date(today0.getFullYear(), today0.getMonth(), 0, 12)); }
+    else if (p === 'all') { from = '2020-01-01'; to = ymd(today0); }
+    else { const n = Number(p) || 7; from = ymd(new Date(today0.getTime() - (n - 1) * 864e5)); to = ymd(today0); }
+    const next = ymd(new Date(new Date(to + 'T12:00:00').getTime() + 864e5));
+    return { from, to, next, f: new Date(from + 'T00:00:00').getTime(), t: new Date(next + 'T00:00:00').getTime() };
+  }
   function renderTeam() {
     const root = $('v-tim');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
-    const cut = S.period === 'all' ? 0 : Date.now() - Number(S.period) * 864e5;
+    const R = teamRange(); const cut = R.f, cutTo = R.t;
+    const us = loadUserStats(R.from, R.next, () => { if (S.tab === 'tim') renderTeam(); });
+    const ux = (id) => ((us || []).find((x) => x.id === id)) || { replies: 0, loginSecs: 0 };
     const rows = S.users.filter((u) => u.active || S.notes.some((n) => n.authorId === u.id)).map((u) => {
-      const mine = S.notes.filter((n) => n.authorId === u.id && n.createdAt >= cut);
+      const mine = S.notes.filter((n) => n.authorId === u.id && n.createdAt >= cut && n.createdAt < cutTo);
       const cnt = (t) => mine.filter((n) => n.type === t).length;
       const own = S.clients.filter((c) => c.ownerId === u.id);
       const open = own.filter(isOpen);
-      const won = own.filter((c) => c.status === 'dobiven' && (c.wonAt || c.createdAt) >= cut);
-      return { id: u.id, total: mine.length, notes: mine.filter((n) => n.type === 'note' || n.type === 'status').length, calls: cnt('call'), meet: cnt('meeting'), mail: cnt('email'),
+      const won = own.filter((c) => c.status === 'dobiven' && (c.wonAt || c.createdAt) >= cut && (c.wonAt || c.createdAt) < cutTo);
+      return { id: u.id, total: mine.length, notes: mine.filter((n) => n.type === 'note' || n.type === 'status').length, calls: cnt('call'), meet: cnt('meeting'), mail: cnt('email'), rep: ux(u.id).replies, login: ux(u.id).loginSecs,
         open: open.length, pipe: sumVal(open), won: won.length, wonV: sumVal(won), stale: open.filter(isStale).length };
     }).sort((a, b) => b.total - a.total);
     const max = Math.max(1, ...rows.map((r) => r.total));
+    const P = [['7', 'Zadnjih 7 dana'], ['30', 'Zadnjih 30 dana'], ['week', 'Ovaj tjedan'], ['lastweek', 'Prošli tjedan'], ['month', 'Ovaj mjesec'], ['lastmonth', 'Prošli mjesec'], ['all', 'Sve']];
     let h = '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Rad prodavača</h2><div class="seg" role="group" aria-label="Razdoblje">' +
-      [['7', '7 dana'], ['30', '30 dana'], ['all', 'Sve']].map((p) => '<button data-period="' + p[0] + '" aria-pressed="' + (S.period === p[0]) + '">' + p[1] + '</button>').join('') + '</div></div>';
-    h += '<section class="panel-b"><div class="tscroll"><table class="tbl"><thead><tr><th>Prodavač</th><th>Aktivnosti</th><th>Bilješke</th><th>Pozivi</th><th>Sastanci</th><th>E-mailovi</th><th>Otvoreni</th><th>Dobiveno</th><th>Bez kontakta</th></tr></thead><tbody>';
+      P.map((p) => '<button data-period="' + p[0] + '" aria-pressed="' + (S.period === p[0]) + '">' + p[1] + '</button>').join('') + '</div></div>';
+    h += '<div class="revbar"><label class="f inl">Od<input type="date" id="tmFrom" value="' + esc(S.tmFrom || R.from) + '"></label><label class="f inl">Do<input type="date" id="tmTo" value="' + esc(S.tmTo || R.to) + '"></label>' +
+      '<button class="btn sm" data-act="tmapply">Prikaži razdoblje</button><span class="muted">Prikazano: ' + (S.period === 'all' ? 'sve' : esc(fmtYmd(R.from) + ' – ' + fmtYmd(R.to))) + '</span></div>';
+    h += '<section class="panel-b"><div class="tscroll"><table class="tbl"><thead><tr><th>Prodavač</th><th>Aktivnosti</th><th>Bilješke</th><th>Pozivi</th><th>Sastanci</th><th>E-mailovi</th><th>Odgovoreni e-mailovi</th><th>Vrijeme u aplikaciji</th><th>Otvoreni</th><th>Dobiveno</th><th>Bez kontakta</th></tr></thead><tbody>';
     h += rows.map((r) => '<tr><td><span class="who"><i style="background:' + hue(r.id) + '"></i>' + esc(person(r.id)) + (r.id === S.me.id ? ' <span class="muted" style="font-weight:400">(ja)</span>' : '') + '</span></td>' +
       '<td>' + r.total + '<span class="mini"><i style="width:' + Math.round(r.total / max * 100) + '%"></i></span></td><td>' + r.notes + '</td><td>' + r.calls + '</td><td>' + r.meet + '</td><td>' + r.mail + '</td>' +
+      '<td>' + (us ? r.rep : '…') + '</td><td>' + (us ? esc(fmtHM(r.login)) : '…') + '</td>' +
       '<td>' + r.open + '<br><span class="muted">' + eur(r.pipe) + '</span></td><td>' + r.won + '<br><span class="muted">' + eur(r.wonV) + '</span></td><td' + (r.stale ? ' class="flag-stale"' : '') + '>' + r.stale + '</td></tr>').join('');
-    h += '</tbody></table></div></section>';
+    h += '</tbody></table></div><p class="muted pad small">Razdoblje birate ručno (brzi odabiri ili datumi od–do). Odgovoreni e-mailovi su poslani odgovori na primljene poruke; vrijeme u aplikaciji bilježi se od uvođenja ove mogućnosti, dok je aplikacija otvorena i prijavljena.</p></section>';
     const feed = S.notes.slice(0, 15);
     h += '<section class="panel-b feed"><header><h3>Zadnje aktivnosti</h3><span class="muted">svi prodavači</span></header>';
     h += feed.length ? '<ul class="list">' + feed.map((n) => { const c = byId(n.clientId); if (!c) return ''; const t = n.type === 'email' ? (n.subject || 'E-mail') : n.text;
@@ -973,21 +1029,25 @@ function initApp() {
       h += '<section class="panel-b"><header><h3>Pošta</h3><span class="muted">sandučić za slanje i primanje</span></header><div class="pad">' +
         '<dl class="meta-grid"><dt>Adresa</dt><dd>' + esc(S.mail.from || 'nije podešena') + '</dd><dt>Slanje (SMTP)</dt><dd>' + (S.mail.enabled ? 'podešeno' : 'nije podešeno') + '</dd>' +
         '<dt>Primanje (IMAP)</dt><dd>' + (S.mail.imap ? 'podešeno, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync)) : 'nije podešeno') + '</dd>' +
-        '<dt>Inbox 2 (samo primanje)</dt><dd>' + (S.mail.imap2 ? 'podešen, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync2)) + (S.mail.error2 && S.mail.error2 !== 'error' ? ' · greška: ' + esc(S.mail.error2) : '') : 'nije podešen (config.php, odjeljak imap2)') + '</dd>' +
+        '<dt>Inbox 2 (primanje i slanje)</dt><dd>' + (S.mail.imap2 ? 'podešen, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync2)) + (S.mail.error2 && S.mail.error2 !== 'error' ? ' · greška: ' + esc(S.mail.error2) : '') : 'nije podešen (config.php, odjeljak imap2)') + '</dd>' +
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
         '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
       h += '<section class="panel-b" id="secPanel">' + secHtml() + '</section>';
       h += '<section class="panel-b" id="bkPanel">' + bkHtml() + '</section>';
       const ic = S.mail.imap2Cfg || { host: '', port: 993, secure: 'ssl', user: '', folder: 'INBOX', hasPass: false, source: '' };
-      h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (samo primanje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
-        '<p class="hint">Dodatni sandučić čije se poruke vide u Inboxu pod "Inbox 2". Pošta se i dalje šalje isključivo s adrese ' + esc(S.mail.from || 'marketing@vip-grupa.eu') + '.' + (ic.source === 'config' ? ' Trenutno se koriste podaci iz config.php; spremanjem ovdje zamjenjuju se.' : '') + '</p>' +
+      h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (primanje i odgovaranje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
+        '<p class="hint">Dodatni sandučić čije se poruke vide u Inboxu pod "Inbox 2". Odgovori na poruke iz Inboxa 2 šalju se s adrese ovog sandučića; odgovori na ostale poruke s adrese ' + esc(S.mail.from || 'marketing@vip-grupa.eu') + '.' + (ic.source === 'config' ? ' Trenutno se koriste podaci iz config.php; spremanjem ovdje zamjenjuju se.' : '') + '</p>' +
         '<div class="grid2"><label class="f">IMAP poslužitelj<input id="b2Host" value="' + esc(ic.host || 'mail.vip-grupa.eu') + '" autocomplete="off" placeholder="mail.vip-grupa.eu"></label>' +
         '<label class="f">Port<input id="b2Port" type="number" min="1" max="65535" value="' + esc(ic.port || 993) + '"></label>' +
         '<label class="f">Sigurnost<select id="b2Sec"><option value="ssl"' + (ic.secure === 'ssl' ? ' selected' : '') + '>SSL/TLS (port 993)</option><option value="tls"' + (ic.secure === 'tls' ? ' selected' : '') + '>STARTTLS (port 143)</option><option value="none"' + (ic.secure === 'none' ? ' selected' : '') + '>Bez šifriranja</option></select></label>' +
         '<label class="f">Mapa<input id="b2Folder" value="' + esc(ic.folder || 'INBOX') + '" autocomplete="off"></label>' +
         '<label class="f">Korisnik (e-mail adresa)<input id="b2User" type="email" value="' + esc(ic.user) + '" autocomplete="off"></label>' +
-        '<label class="f">Lozinka<input id="b2Pass" type="password" autocomplete="new-password" placeholder="' + (ic.hasPass ? 'spremljena, ostavite prazno da ostane' : 'lozinka sandučića') + '"></label></div>' +
+        '<label class="f">Lozinka<input id="b2Pass" type="password" autocomplete="new-password" placeholder="' + (ic.hasPass ? 'spremljena, ostavite prazno da ostane' : 'lozinka sandučića') + '"></label>' +
+        '<label class="f">SMTP poslužitelj (slanje)<input id="b2SHost" value="' + esc(ic.smtpHost || ic.host || '') + '" autocomplete="off" placeholder="isti kao IMAP"></label>' +
+        '<label class="f">SMTP port<input id="b2SPort" type="number" min="1" max="65535" value="' + esc(ic.smtpPort || 465) + '"></label>' +
+        '<label class="f">SMTP sigurnost<select id="b2SSec"><option value="ssl"' + ((ic.smtpSecure || 'ssl') === 'ssl' ? ' selected' : '') + '>SSL/TLS (port 465)</option><option value="tls"' + (ic.smtpSecure === 'tls' ? ' selected' : '') + '>STARTTLS (port 587)</option><option value="none"' + (ic.smtpSecure === 'none' ? ' selected' : '') + '>Bez šifriranja</option></select></label>' +
+        '<label class="f">Naziv pošiljatelja (neobavezno)<input id="b2FName" value="' + esc(ic.fromName || '') + '" autocomplete="off" placeholder="npr. Sjeverni FM"></label></div>' +
         '<div class="msg" id="b2Msg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="b2test">Provjeri vezu</button><button class="btn primary" data-act="b2save">Spremi</button>' + (ic.source === 'settings' ? '<button class="btn danger" data-act="b2clear">Ukloni Inbox 2</button>' : '') + '</div></div></section>';
       const st = S.settings || { autoreply: { enabled: true, subject: '', body: '' }, reportEnabled: true, workHours: '' };
       h += '<section class="panel-b"><header><h3>Automatski odgovor izvan radnog vremena</h3><span class="muted">radno vrijeme: ' + esc(st.workHours) + '</span></header><div class="pad">' +
@@ -1021,10 +1081,10 @@ function initApp() {
     const ok = await safe(() => call('signature_save', { signature: $('sigText').value.trim() }), 'Potpis spremljen');
     if (ok) refresh(true);
   }
-  function b2Body() { return { host: $('b2Host').value.trim(), port: Number($('b2Port').value) || 993, secure: $('b2Sec').value, folder: $('b2Folder').value.trim(), user: $('b2User').value.trim(), pass: $('b2Pass').value }; }
+  function b2Body() { return { host: $('b2Host').value.trim(), port: Number($('b2Port').value) || 993, secure: $('b2Sec').value, folder: $('b2Folder').value.trim(), user: $('b2User').value.trim(), pass: $('b2Pass').value, smtp_host: $('b2SHost').value.trim(), smtp_port: Number($('b2SPort').value) || 465, smtp_secure: $('b2SSec').value, from_name: $('b2FName').value.trim() }; }
   async function b2Test() {
     const m = $('b2Msg'); m.textContent = 'Provjeravam vezu…';
-    try { const r = await call('imap2_test', b2Body()); m.textContent = r.ok ? 'Veza radi: prijava i mapa su u redu. Kliknite Spremi.' : r.error; } catch (e) { m.textContent = e.message; }
+    try { const r = await call('imap2_test', b2Body()); m.textContent = r.ok ? 'Veza radi: primanje (IMAP) i slanje (SMTP) su u redu. Kliknite Spremi.' : r.error; } catch (e) { m.textContent = e.message; }
   }
   async function b2Save() {
     const m = $('b2Msg'); m.textContent = '';
@@ -1717,7 +1777,7 @@ function initApp() {
   document.addEventListener('click', (ev) => {
     const t = ev.target;
     const tab = t.closest('[data-tab]'); if (tab) { setTab(tab.dataset.tab); return; }
-    const per = t.closest('[data-period]'); if (per) { S.period = per.dataset.period; renderTeam(); return; }
+    const per = t.closest('[data-period]'); if (per) { S.period = per.dataset.period; S.tmFrom = ''; S.tmTo = ''; renderTeam(); return; }
     const mailBtn = t.closest('[data-mail]'); if (mailBtn) { openMailItem(mailBtn.dataset.mail); return; }
     const op = t.closest('[data-open]'); if (op) { openClient(op.dataset.open, !!op.dataset.keep); return; }
     const a = t.closest('[data-act]');
@@ -1737,13 +1797,13 @@ function initApp() {
       else if (act === 'taskopen') taskOpen(a.dataset.id);
       else if (act.indexOf('tk_') === 0) taskDetailAct(act, a);
       else if (act === 'tkfilter') { S.tkFilter = a.dataset.v; renderTasksTab(); }
-      else if (act === 'stper') { S.stKind = a.dataset.v; S.stIdx = 0; renderOverview(); }
       else if (act === 'revmore') { S.revMore = !S.revMore; renderRevenue(); }
       else if (act === 'revper') { S.revPeriod = a.dataset.v; renderRevenue(); }
       else if (act === 'mail') openMail('Prvi');
       else if (act === 'msend') sendMail();
       else if (act === 'del1') $('delConfirm').hidden = false;
       else if (act === 'del2') deleteClient();
+      else if (act === 'tmapply') { const f = $('tmFrom').value, t2 = $('tmTo').value; if (!f || !t2 || f > t2) { toast('Upišite ispravno razdoblje (Od ne smije biti iza Do).', true); return; } S.tmFrom = f; S.tmTo = t2; S.period = 'custom'; renderTeam(); }
       else if (act === 'sync' || act === 'syncnow') syncInbox(true, false);
       else if (act === 'reply') sendReply(a.dataset.id);
       else if (act === 'link') { const v = $('rLink').value; if (v) safe(() => call('email_link', { email_id: a.dataset.id, client_id: v }), 'Poruka povezana').then((ok) => { if (ok) refresh(true).then(() => openMailItem(a.dataset.id)); }); }
@@ -1798,7 +1858,6 @@ function initApp() {
     else if (id === 'fKind') { S.fKind = ev.target.value; renderClients(); }
     else if (id === 'fIndustry') { S.fIndustry = ev.target.value; renderClients(); }
     else if (id === 'tkWho') { S.tkWho = ev.target.value; document.activeElement.blur(); renderTasksTab(); }
-    else if (id === 'stPeriod') { S.stIdx = Number(ev.target.value); renderOverview(); }
     else if (id === 'revUser') { S.revUser = ev.target.value; renderRevenue(); }
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
     else if (ev.target.name === 'nKindR') applyNewKind();
@@ -1831,5 +1890,9 @@ function initApp() {
   setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 20000);
   setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'pregled') { loadUsage(); if (isAdmin()) loadRevenue(true); } if (document.visibilityState === 'visible' && S.tab === 'tim') loadAudit(); }, 60000);
   setInterval(() => { if (document.visibilityState === 'visible' && S.tab === 'inbox') syncInbox(false, true); }, 120000);
+  /* vrijeme u aplikaciji: otvorena i prijavljena aplikacija javlja se svakih 45 s */
+  const presencePing = () => { if (S.me && S.csrf) call('ping', {}).catch(() => {}); };
+  setInterval(presencePing, 45000);
+  setTimeout(presencePing, 3000);
 }
 })();
