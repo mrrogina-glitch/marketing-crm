@@ -441,6 +441,22 @@ try {
             out(['usage' => usage_report()]);
         }
 
+        case 'ping': {
+            $u = need_write();
+            presence_ping((int) $u['id']);
+            out(['ok' => true]);
+        }
+
+        case 'user_stats': {
+            $u = need_user();
+            $from = (string) ($_GET['from'] ?? '');
+            $to = (string) ($_GET['to'] ?? '');
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || $to <= $from || strtotime($to) - strtotime($from) > 4000 * 86400) {
+                throw new ApiError('Razdoblje nije ispravno.');
+            }
+            out(['from' => $from, 'to' => $to, 'users' => user_stats($u, $from, $to)]);
+        }
+
         case 'revenue': {
             $u = need_user();
             out(revenue_report($u));
