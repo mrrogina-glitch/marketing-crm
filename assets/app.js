@@ -67,7 +67,7 @@ function initApp() {
   const SERVICES = ['Radio SPOT', 'Radio Emisija', 'PR Portali', 'Baner'];
   const svcBox = (sel) => { const have = String(sel || '').split(',').map((x) => x.trim()); return SERVICES.map((s) => '<label class="chk"><input type="checkbox" value="' + esc(s) + '"' + (have.includes(s) ? ' checked' : '') + '> ' + esc(s) + '</label>').join(''); };
   const svcRead = (id) => Array.from($(id).querySelectorAll('input:checked')).map((i) => i.value).join(', ');
-  const TYPES = { note: 'Bilješka', call: 'Poziv', meeting: 'Sastanak', email: 'E-mail poslan', inmail: 'E-mail primljen', status: 'Status' };
+  const TYPES = { note: 'Bilješka', call: 'Kontakt telefonom', meeting: 'Sastanak', email: 'E-mail poslan', inmail: 'E-mail primljen', status: 'Status' };
   const STALE_DAYS = 14;
   const TABS = ['pregled', 'klijenti', 'aktivni', 'zadaci', 'inbox', 'kampanje', 'tim', 'postavke'];
   const meta = document.querySelector('meta[name="csrf"]');
@@ -612,7 +612,7 @@ function initApp() {
         '<span class="c-svc">' + esc(c.service) + '</span><span class="c-st">' + pill(c.status) + '</span>' +
         '<span class="c-val">' + (c.value ? eur(c.value) + '<small>' + (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + '</small>' : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +
         '<span class="c-note' + (st ? ' flag-stale' : '') + '" data-l="Zadnji kontakt:">' + esc(t ? rel(t) : 'nema bilješki') + '</span>' +
-        '<span class="c-next' + (du ? ' flag-late' : '') + '" data-l="Javiti se:">' + (c.nextFollowUp ? fmtYmd(c.nextFollowUp) : '–') + '</span></button>';
+        '<span class="c-next' + (du ? ' flag-late' : '') + '" data-l="Javiti se:">' + (c.nextFollowUp ? fmtYmd(c.nextFollowUp) + (c.nextFollowTime ? ' ' + esc(c.nextFollowTime) : '') : '–') + '</span></button>';
     }).join('');
     box.innerHTML = h;
   }
@@ -1181,8 +1181,9 @@ function initApp() {
       dncBanner(c) +
       '<div class="sec"><div class="acts"><label class="f">Status<select id="stSel">' + STAGES.map((s) => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('') + '</select></label><button class="btn" data-act="mail">Napiši e-mail</button>' + (String(c.ownerId) !== String(S.me.id) ? '<button class="btn" data-act="take">Preuzmi klijenta</button>' : '') + '</div>' +
       '<div class="pending" id="stPending" hidden><p id="stLabel"></p><textarea id="stText" placeholder="Razlog promjene ili što je dogovoreno (obavezno)"></textarea><div class="msg" id="stMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="stok">Potvrdi promjenu</button><button class="btn sm" data-act="stno">Odustani</button></div></div></div>' +
-      '<div class="sec"><h3>Nova bilješka <span class="req" style="font-size:12px">obavezno</span></h3><div class="compose"><div class="row"><label class="f">Vrsta<select id="noteType"><option value="note">Bilješka</option><option value="call">Poziv</option><option value="meeting">Sastanak</option></select></label>' +
-      '<label class="f">Sljedeći kontakt<input id="noteFollow" type="date"' + (c.nextFollowUp ? ' value="' + esc(c.nextFollowUp) + '"' : '') + '></label>' +
+      '<div class="sec"><h3>Nova bilješka <span class="req" style="font-size:12px">obavezno</span></h3><div class="compose"><div class="row"><label class="f">Vrsta<select id="noteType"><option value="note">Bilješka</option><option value="call">Kontakt telefonom</option><option value="meeting">Sastanak</option></select></label>' +
+      '<label class="f">Sljedeći kontakt (datum)<input id="noteFollow" type="date"' + (c.nextFollowUp ? ' value="' + esc(c.nextFollowUp) + '"' : '') + '></label>' +
+      '<label class="f">Sat sljedećeg kontakta<input id="noteFollowT" type="time"' + (c.nextFollowTime ? ' value="' + esc(c.nextFollowTime) + '"' : '') + '></label>' +
       '<label class="f">Vrijednost (€)<input id="noteValue" type="number" min="0" step="50" inputmode="decimal" value="' + esc(c.value || '') + '"></label>' +
       '<label class="f">Vrsta vrijednosti<select id="noteVKind"><option value="ponudeno"' + (c.valueKind !== 'ugovoreno' ? ' selected' : '') + '>Ponuđeno</option><option value="ugovoreno"' + (c.valueKind === 'ugovoreno' ? ' selected' : '') + '>Ugovoreno</option></select></label></div><textarea id="noteText" placeholder="Što je dogovoreno ili napravljeno, i koji je sljedeći korak."></textarea>' +
       '<div class="f wide campbox"><label class="chk"><input type="checkbox" id="cCamp"' + (c.campActive ? ' checked' : '') + '> Aktivni: klijent ima aktivnu kampanju</label>' +
@@ -1263,7 +1264,8 @@ function initApp() {
     const ta = $('noteText'); const text = ta.value.trim();
     if (text.length < 3) { $('noteMsg').textContent = 'Bilješka je obavezna. Upišite što je dogovoreno ili napravljeno.'; ta.focus(); return; }
     const body = { client_id: c.id, type: $('noteType').value, text };
-    const fu = $('noteFollow').value; if (fu && fu !== c.nextFollowUp) body.next_follow_up = fu;
+    const fu = $('noteFollow').value, fut = $('noteFollowT').value;
+    if (fu && (fu !== c.nextFollowUp || fut !== (c.nextFollowTime || ''))) { body.next_follow_up = fu; body.next_follow_time = fut; }
     const nv = $('noteValue').value, nk = $('noteVKind').value;
     if (nv !== '' && (Number(nv) !== Number(c.value || 0) || nk !== (c.valueKind || 'ponudeno'))) { body.value = Number(nv); body.value_kind = nk; }
     const on = $('cCamp').checked, cs = $('cCampStart').value, ce = $('cCampEnd').value, cv = $('cCampValue').value;
@@ -1336,7 +1338,7 @@ function initApp() {
   }
   function openNew(prefill) {
     S.lastFocus = document.activeElement;
-    ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nPhone', 'nValue', 'nFollow', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
+    ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nPhone', 'nValue', 'nFollow', 'nFollowT', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
     $('nCamp').checked = false; $('nCampDates').hidden = true; $('nVKind').value = 'ponudeno';
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
@@ -1363,7 +1365,7 @@ function initApp() {
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
     m.textContent = ''; $('nSave').disabled = true;
     try {
-      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, value_kind: $('nVKind').value, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, camp_active: $('nCamp').checked, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
+      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, value_kind: $('nVKind').value, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, next_follow_time: $('nFollowT').value, camp_active: $('nCamp').checked, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
       toast('Klijent spremljen');
       $('mNew').hidden = true;
       await refresh(true);
