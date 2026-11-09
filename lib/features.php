@@ -153,6 +153,49 @@ function sync_document_clients(): void
 }
 
 /** @return list<array{0:string,1:string,2:string}> */
+/** Privitci učitani uz odgovor (multipart): [naziv, mime, podaci]. */
+function uploaded_attachments(string $key, int $already = 0): array
+{
+    $f = $_FILES[$key] ?? null;
+    if (!$f || !is_array($f['name'] ?? null)) {
+        return [];
+    }
+    $out = [];
+    $total = 0;
+    foreach ($f['name'] as $i => $name) {
+        $err = (int) ($f['error'][$i] ?? UPLOAD_ERR_NO_FILE);
+        if ($err === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
+            throw new ApiError('Privitak je prevelik za ovaj poslužitelj.', 413);
+        }
+        if ($err !== UPLOAD_ERR_OK || !is_uploaded_file((string) $f['tmp_name'][$i])) {
+            throw new ApiError('Učitavanje privitka nije uspjelo.');
+        }
+        $clean = trim(preg_replace('/[\x00-\x1f\x7f"\\\\\/:*?<>|]+/u', '_', basename(str_replace('\\', '/', (string) $name))) ?? '');
+        if ($clean === '' || mb_strlen($clean) > 150) {
+            $clean = $clean === '' ? 'privitak' : mb_substr($clean, -150);
+        }
+        if (preg_match('/\.(exe|bat|cmd|com|scr|msi|js|jse|vbs|vbe|wsf|ps1|jar|dll|lnk|hta|php\d?|phtml)$/i', $clean)) {
+            throw new ApiError('Vrsta datoteke "' . $clean . '" ne može se slati e-poštom.');
+        }
+        $data = file_get_contents((string) $f['tmp_name'][$i]);
+        if ($data === false || $data === '') {
+            throw new ApiError('Privitak "' . $clean . '" je prazan.');
+        }
+        $total += strlen($data);
+        if ($total > MAIL_ATTACH_MAX_BYTES) {
+            throw new ApiError('Privici zajedno smiju imati najviše 15 MB.');
+        }
+        $out[] = [$clean, 'application/octet-stream', $data];
+    }
+    if (count($out) + $already > 10) {
+        throw new ApiError('Najviše 10 privitaka po poruci.');
+    }
+    return $out;
+}
+
 function load_attachments(array $docIds, ?int $clientId): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $docIds))));
@@ -187,7 +230,7 @@ function load_attachments(array $docIds, ?int $clientId): array
  * The signature is NOT added here; callers add it with with_signature().
  * @return int id of the stored e-mail
  */
-function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false, array $headers = [], int $box = 1): int
+function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false, array $headers = [], int $box = 1, array $files = []): int
 {
     if (!Mailer::configured()) {
         throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
@@ -199,6 +242,9 @@ function send_and_store(?array $u, string $to, string $subject, string $text, ?i
         }
     }
     $attachments = $docIds ? load_attachments($docIds, $clientId) : [];
+    foreach ($files as $f) {
+        $attachments[] = $f;
+    }
     $extra = ($inReplyTo ? ['In-Reply-To' => $inReplyTo, 'References' => $inReplyTo] : []) + $headers;
     if ($auto) {
         $extra['Auto-Submitted'] = 'auto-replied';
