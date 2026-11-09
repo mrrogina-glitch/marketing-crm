@@ -752,6 +752,78 @@ try {
             out(['ok' => true]);
         }
 
+        case 'campaign_extend': {
+            $u = need_write();
+            $in = body();
+            $c = load_client((string) ($in['client_id'] ?? ''));
+            if ($u['role'] !== 'admin' && (int) $c['owner_id'] !== (int) $u['id']) {
+                throw new ApiError('Kampanju može produljiti administrator ili prodavač klijenta.', 403);
+            }
+            if ((int) $c['camp_active'] !== 1 || empty($c['camp_end'])) {
+                throw new ApiError('Klijent nema aktivnu kampanju.');
+            }
+            $ne = f_date($in['end'] ?? '');
+            if ($ne === null || $ne <= (string) $c['camp_end']) {
+                throw new ApiError('Novi datum završetka mora biti nakon današnjeg završetka kampanje.');
+            }
+            $old = (string) $c['camp_end'];
+            run('UPDATE clients SET camp_end = ?, updated_at = ? WHERE id = ?', [$ne, ms(), $c['id']]);
+            run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
+                [$c['id'], $u['id'], 'note', 'Kampanja produljena: ' . date('d.m.Y.', strtotime($old)) . ' → ' . date('d.m.Y.', strtotime($ne)), ms()]);
+            audit((int) $c['id'], (int) $u['id'], 'campaign', 'Kampanja produljena do ' . date('d.m.Y.', strtotime($ne)), (string) $c['name']);
+            run('UPDATE alerts SET done_at = ? WHERE client_id = ? AND kind = ? AND done_at IS NULL', [ms(), $c['id'], 'camp_soon']);
+            out(['ok' => true]);
+        }
+
+        case 'search': {
+            need_user();
+            $q = trim((string) ($_GET['q'] ?? ''));
+            if (mb_strlen($q) < 2) {
+                out(['clients' => [], 'notes' => [], 'emails' => []]);
+            }
+            $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_substr($q, 0, 80)) . '%';
+            $cl = rows("SELECT id, name, contact, email, status FROM clients WHERE name LIKE ? ESCAPE '!' OR contact LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!' OR oib LIKE ? ESCAPE '!' OR phone LIKE ? ESCAPE '!' ORDER BY name LIMIT 8", [$like, $like, $like, $like, $like]);
+            $nt = rows("SELECT n.id, n.client_id, n.type, n.body, n.created_at, c.name AS cname FROM notes n JOIN clients c ON c.id = n.client_id WHERE n.body LIKE ? ESCAPE '!' OR n.subject LIKE ? ESCAPE '!' ORDER BY n.created_at DESC LIMIT 8", [$like, $like]);
+            $em = rows("SELECT id, direction, from_email, from_name, to_email, subject, body, msg_date FROM emails WHERE deleted_at IS NULL AND (subject LIKE ? ESCAPE '!' OR body LIKE ? ESCAPE '!' OR from_email LIKE ? ESCAPE '!' OR from_name LIKE ? ESCAPE '!' OR to_email LIKE ? ESCAPE '!') ORDER BY msg_date DESC LIMIT 8", [$like, $like, $like, $like, $like]);
+            $snip = static function (string $t) use ($q): string {
+                $t = trim(preg_replace('/\s+/u', ' ', $t) ?? $t);
+                $p = mb_stripos($t, $q);
+                $from = $p === false ? 0 : max(0, $p - 40);
+                return ($from > 0 ? '…' : '') . mb_substr($t, $from, 120) . (mb_strlen($t) > $from + 120 ? '…' : '');
+            };
+            out([
+                'clients' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'name' => (string) $r['name'], 'contact' => (string) $r['contact'], 'email' => (string) $r['email'], 'status' => (string) $r['status']], $cl),
+                'notes' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'client' => (string) $r['cname'], 'type' => (string) $r['type'], 'snip' => $snip((string) $r['body']), 'at' => (int) $r['created_at']], $nt),
+                'emails' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'dir' => $r['direction'] === 'in' ? 'in' : 'out', 'who' => $r['direction'] === 'in' ? trim((string) $r['from_name'] . ' <' . $r['from_email'] . '>') : (string) $r['to_email'], 'subject' => (string) $r['subject'], 'snip' => $snip((string) $r['body']), 'at' => (int) $r['msg_date']], $em),
+            ]);
+        }
+
+        case 'goals': {
+            $u = need_user();
+            out(goals_report($u));
+        }
+
+        case 'goals_save': {
+            $u = need_write();
+            need_admin($u);
+            $in = body()['goals'] ?? [];
+            $clean = [];
+            if (is_array($in)) {
+                foreach ($in as $id => $v) {
+                    $v = round((float) $v, 2);
+                    if ($v < 0 || $v > 1000000) {
+                        throw new ApiError('Cilj mora biti između 0 i 1.000.000 €.');
+                    }
+                    if ($v > 0 && row("SELECT id FROM users WHERE id = ? AND role = 'sales'", [(int) $id])) {
+                        $clean[(string) (int) $id] = $v;
+                    }
+                }
+            }
+            setting_set('weekly_goals', json_encode($clean));
+            audit(null, (int) $u['id'], 'update', 'Tjedni ciljevi prihoda ažurirani');
+            out(['ok' => true]);
+        }
+
         case 'campaign_renew': {
             $u = need_write();
             $in = body();

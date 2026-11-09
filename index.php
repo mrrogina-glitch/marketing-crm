@@ -61,6 +61,7 @@ $v = static function (string $f): string {
       <button class="tab" role="tab" data-tab="postavke" id="t-postavke">Postavke</button>
     </nav>
     <div class="bar-r">
+      <div class="gsearch"><input id="gq" type="search" placeholder="Traži klijente, bilješke, poruke…" autocomplete="off" aria-label="Pretraga kroz sve" maxlength="80"><div class="gres" id="gres" hidden></div></div>
       <button class="btn primary" id="btnNew" data-act="new">Novi klijent</button>
       <div class="me"><span id="meName"></span><button class="btn sm" data-act="logout">Odjava</button></div>
     </div>
@@ -156,6 +157,7 @@ $v = static function (string $f): string {
         <label class="f wide"><span>Prva bilješka <span class="req">* obavezno</span></span>
           <textarea id="nNote" placeholder="Kako je kontakt nastao, što klijent traži, što je dogovoreno."></textarea></label>
       </div>
+      <div class="banner dupwarn" id="nDup" role="status" hidden></div>
       <div class="msg" id="nMsg" role="alert"></div>
       <div class="row-btns end">
         <button type="button" class="btn" data-act="close">Odustani</button>
