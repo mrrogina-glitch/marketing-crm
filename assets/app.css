@@ -720,3 +720,28 @@ small.tr.down{font-weight:650}
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn.primary,:root:not([data-theme="light"]) .badge{color:var(--accent-ink)}}
 :root[data-theme="dark"] .btn.primary,:root[data-theme="dark"] .badge{color:var(--accent-ink)}
+
+/* pretraga kroz sve */
+.gsearch{position:relative;flex:1 1 220px;max-width:340px;min-width:160px}
+.gsearch input{border-radius:999px;padding:8px 14px;min-height:38px;background:var(--sunken);border-color:transparent}
+.gres{position:absolute;right:0;top:calc(100% + 8px);width:min(520px,92vw);max-height:70vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh-3);z-index:60;padding:6px}
+.gh{font:600 11.5px var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:10px 12px 4px}
+.gi{display:flex;flex-direction:column;gap:1px;width:100%;text-align:left;background:none;border:0;border-radius:10px;padding:8px 12px}
+.gi:hover,.gi:focus-visible{background:color-mix(in srgb,var(--accent) 8%,var(--sunken))}
+.gi b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gi small{color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dupwarn{margin:0;font-size:13px}
+@media (max-width:640px){.gsearch{order:5;flex-basis:100%;max-width:none}.gres{left:0;right:0;width:auto}}
+
+/* tjedni cilj */
+.goalwrap{gap:18px}
+.goalrow{display:flex;flex-direction:column;gap:6px}
+.goalrow .gtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.goalrow .gtop small{color:var(--ink-3);font-weight:400}
+.goalrow.strong .gtop b{font-size:16px}
+.goalrow .goalbar{height:12px;margin-top:0}
+.goalrow.goal-low .goalbar i{background:linear-gradient(90deg,var(--warn),#E8A33D)}
+.goalrow.goal-mid .goalbar i{background:var(--grad)}
+.goalrow.goal-done .goalbar i{background:linear-gradient(90deg,var(--good),#2FB27A)}
+.goalrow .gfoot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--ink-3)}
+.goalrow+.goalrow{padding-top:14px;border-top:1px dashed var(--line)}

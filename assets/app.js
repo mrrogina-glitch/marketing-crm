@@ -261,7 +261,7 @@ function initApp() {
     const done = S.tasks.filter((t) => t.doneAt).sort((a, b) => b.doneAt - a.doneAt);
     const late = open.filter((t) => t.due < today()).length;
     return '<section class="panel-b"><header><h3>Zadaci</h3><span class="muted">' + open.length + ' otvoreno' + (late ? ' · <b class="lt">' + late + ' kasni</b>' : '') + '</span></header>' +
-      (open.length ? '<ul class="list tasks">' + open.map((t) => taskLi(t, true)).join('') + '</ul>' : '<p class="muted pad">Nema otvorenih zadataka.</p>') +
+      (open.length ? '<ul class="list tasks">' + (S.tkMore ? open : open.slice(0, 10)).map((t) => taskLi(t, true)).join('') + '</ul>' + (open.length > 10 ? '<div class="revmore"><button class="btn sm" data-act="tkmore">' + (S.tkMore ? 'Prikaži manje (prvih 10)' : 'Prikaži više (još ' + (open.length - 10) + ')') + '</button></div>' : '') : '<p class="muted pad">Nema otvorenih zadataka.</p>') +
       taskForm('tk', '') +
       (done.length ? '<details class="tkdone"><summary>Završeno zadnjih 7 dana (' + done.length + ')</summary><ul class="list tasks">' + done.map((t) => taskLi(t, true)).join('') + '</ul></details>' : '') + '</section>';
   }
@@ -521,6 +521,7 @@ function initApp() {
       '<div><div class="k">Bez nedavnog kontakta</div><div class="v' + (stale.length ? ' warn' : '') + '">' + stale.length + '</div><div class="s">' + STALE_DAYS + ' dana ili dulje</div></div>' +
       '<div><div class="k">Dobiveno</div><div class="v">' + won.length + '</div><div class="s">' + eur(sumVal(won)) + '</div></div></div>';
     if (isAdmin() && pend.length) h += '<p class="hint">Zakazano slanje: ' + pend.length + ' ' + plural(pend.length, 'poruka', 'poruka') + ' (Inbox > Zakazano slanje).</p>';
+    h += '<section class="panel-b" id="goalPanel" hidden></section>';
     const ending = mine.filter(campSoon).sort((a, b) => a.campEnd.localeCompare(b.campEnd));
     if (ending.length) {
       h += '<section class="panel-b"><header><h3>Kampanje koje istječu za 7 dana</h3><span class="muted">ljubičasto: dnevne i kampanje kraće od 7 dana</span></header><ul class="list">' +
@@ -541,7 +542,7 @@ function initApp() {
     h += '<section class="panel-b" id="revPanel"></section>';
     if (isAdmin()) h += '<section class="panel-b" id="usagePanel"></section>';
     root.innerHTML = h;
-    renderRevenue(); loadRevenue();
+    renderRevenue(); loadRevenue(); renderGoals(); loadGoals();
     if (isAdmin()) { renderUsage(); loadUsage(); }
   }
 
@@ -741,11 +742,24 @@ function initApp() {
     h += '</div><div class="sec"><h3>Poruka</h3><div class="mailbody">' + esc(e.body) + '</div><div class="acts" style="margin-top:10px"><button class="btn sm danger" data-act="maildel" data-id="' + esc(e.id) + '">Obriši poruku</button><span class="hint">Briše poruku iz aplikacije (ne i sa poslužitelja e-pošte).</span></div></div>';
     {
       const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
-      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose"><textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
+      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose">' + replyTplSelect() + '<textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
         '<p class="hint">Odgovor odlazi s adrese ' + esc(e.box === 2 && S.mail.from2 ? S.mail.from2 : S.mail.from) + ' (sandučić na koji je poruka stigla) na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
     }
     h += '</div>';
     sh.innerHTML = h;
+  }
+  function replyTplSelect() {
+    const tpls = S.templates.filter((t) => t.kind !== 'akcija');
+    if (!tpls.length) return '';
+    return '<label class="f">Predložak odgovora<select id="rTpl"><option value="">Umetni gotov tekst…</option>' + tpls.map((t) => '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>').join('') + '</select></label>';
+  }
+  function replyApplyTpl() {
+    const t = S.templates.find((x) => x.id === $('rTpl').value); if (!t) return;
+    const e = S.emails.find((x) => x.id === S.openMailId) || {};
+    const c = (e.clientId && byId(e.clientId)) || { contact: (e.fromName || '').trim(), name: '', service: '' };
+    const body = fillTpl(t, c).body; const ta = $('rBody');
+    ta.value = ta.value.trim() ? ta.value.trim() + '\n\n' + body : body;
+    $('rTpl').value = ''; ta.focus();
   }
   async function deleteMail(id) {
     if (!confirm('Obrisati ovu poruku iz aplikacije? Radnja se ne može poništiti.')) return;
@@ -813,7 +827,7 @@ function initApp() {
 
   /* ---------- obavijesti, sigurnost, ne kontaktirati, duplikati, uvoz ---------- */
   const dncHas = (e) => !!e && (S.dnc || []).includes(String(e).toLowerCase());
-  const ALERT_ICON = { task: '📋', camp_end: '🔔', security: '🛡️', unsub: '✉️' };
+  const ALERT_ICON = { task: '📋', camp_end: '🔔', camp_soon: '⏳', security: '🛡️', unsub: '✉️' };
   function alertsPanel() {
     const al = S.alerts || [];
     if (!al.length) return '';
@@ -822,6 +836,7 @@ function initApp() {
       return '<li class="alrow"><div class="a"><b>' + (ALERT_ICON[a.kind] || '⏰') + ' ' + esc(a.title) + '</b><small>' + esc(a.body).replace(/\n/g, '<br>') + '</small></div><span class="acts">' +
         (c ? '<button class="btn sm" data-open="' + esc(c.id) + '">Otvori klijenta</button>' : '') +
         (a.kind === 'camp_end' && a.data ? '<button class="btn sm primary" data-act="alrenew" data-id="' + esc(a.id) + '">Obnovi kampanju</button>' : '') +
+        (a.kind === 'camp_soon' && a.data ? '<button class="btn sm primary" data-act="alextend" data-id="' + esc(a.id) + '">Produži do ' + esc(fmtYmd(a.data.newEnd)) + '</button>' : '') +
         (a.kind === 'security' && isAdmin() ? '<button class="btn sm" data-goto="postavke">Sigurnost</button>' : '') +
         '<button class="btn sm" data-act="aldone" data-id="' + esc(a.id) + '">Riješeno</button></span></li>';
     }).join('') + '</ul></section>';
@@ -829,6 +844,11 @@ function initApp() {
   async function alertDone(id) {
     const ok = await safe(() => call('alert_done', { id }));
     if (ok) { S.alerts = (S.alerts || []).filter((a) => a.id !== id); renderOverview(); }
+  }
+  async function alertExtend(id) {
+    const a = (S.alerts || []).find((x) => x.id === id); if (!a || !a.data) return;
+    const ok = await safe(() => call('campaign_extend', { client_id: a.clientId, end: a.data.newEnd }), 'Kampanja produljena');
+    if (ok) { S.alerts = (S.alerts || []).filter((x) => x.id !== id); await refresh(true); renderOverview(); }
   }
   async function alertRenew(id) {
     const a = (S.alerts || []).find((x) => x.id === id); if (!a || !a.data) return;
@@ -1058,6 +1078,7 @@ function initApp() {
         '<label class="chk"><input type="checkbox" id="repOn"' + (st.reportEnabled ? ' checked' : '') + '> Tjedni izvještaj voditeljima (administratorima) svaki ponedjeljak od 08:00 i mjesečni izvještaj 1. u mjesecu od 08:00 (po prodavaču, s popisom izvršenih usluga)</label>' +
         '<div class="msg" id="arMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="arsave">Spremi</button><button class="btn" data-act="reportprev">Pregledaj izvještaj za prošli tjedan</button><button class="btn" data-act="reportsend"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji izvještaj meni</button><button class="btn" data-act="reportprevm">Pregledaj mjesečni izvještaj</button><button class="btn" data-act="reportsendm"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji mjesečni izvještaj meni</button></div>' +
         '<pre class="reportbox" id="reportBox" hidden></pre></div></section>';
+      h += goalSettingsHtml();
       h += '<section class="panel-b"><header><h3>Predlošci e-mailova</h3><span class="muted">oznake: {{ime}} {{tvrtka}} {{usluga}} {{moje_ime}}; potpis se dodaje sam</span></header><div class="pad">' +
         S.templates.filter((t) => t.kind !== 'akcija').map((t) => tplForm(t)).join('') +
         tplForm({ id: '', kind: 'email', name: '', subject: '', body: '' }, 'Novi predložak') + '</div></section>';
@@ -1435,10 +1456,85 @@ function initApp() {
     if (k === 'osoba' && !$('nName').value.trim() && S.nGuess) $('nName').value = S.nGuess;
     if (k === 'tvrtka' && !$('nContact').value.trim() && S.nGuess) $('nContact').value = S.nGuess;
   }
+  /* tjedni ciljevi prihoda */
+  async function loadGoals(force) {
+    if (S.goalBusy || (!force && S.goals && Date.now() - S.goalAt < 30000)) return;
+    S.goalBusy = true;
+    try { S.goals = await call('goals', null, 'GET'); S.goalAt = Date.now(); if (S.tab === 'pregled') renderGoals(); } catch (e) { /* ignore */ } finally { S.goalBusy = false; }
+  }
+  function goalBar(name, goal, cur, prev, strong) {
+    const pct = goal > 0 ? Math.round(cur / goal * 100) : 0; const w = Math.max(0, Math.min(100, pct));
+    const left = Math.max(0, goal - cur);
+    const state = goal <= 0 ? '' : pct >= 100 ? 'goal-done' : pct >= 60 ? 'goal-mid' : 'goal-low';
+    const d = cur - prev;
+    return '<div class="goalrow ' + state + (strong ? ' strong' : '') + '"><div class="gtop"><b>' + esc(name) + '</b><span class="nums">' + eur(cur) + (goal > 0 ? ' <small>od ' + eur(goal) + '</small>' : '') + '</span></div>' +
+      (goal > 0 ? '<div class="mini goalbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + w + '"><i style="width:' + w + '%"></i></div>' : '<div class="hint">Cilj nije postavljen.</div>') +
+      '<div class="gfoot"><small>' + (goal > 0 ? (pct >= 100 ? 'Cilj ostvaren (' + pct + ' %)' + (cur > goal ? ', iznad cilja ' + eur(cur - goal) : '') : pct + ' % cilja, još ' + eur(left)) : '') + '</small><small class="tr ' + (d > 0 ? 'up' : d < 0 ? 'down' : 'eq') + '">' + (d > 0 ? '▲ ' : d < 0 ? '▼ ' : '= ') + eur(Math.abs(d)) + ' u odnosu na prošli tjedan</small></div></div>';
+  }
+  function renderGoals() {
+    const el = $('goalPanel'); if (!el) return;
+    const G = S.goals; if (!G || !G.rows || !G.rows.some((r) => r.goal > 0 || !G.admin)) { el.innerHTML = ''; el.hidden = true; return; }
+    el.hidden = false;
+    let h = '<header><h3>Tjedni cilj prihoda</h3><span class="muted">' + esc(fmtYmd(G.week)) + ' – ' + esc(fmtYmd(G.weekEnd)) + ' · kampanja se računa u tjednu početka</span></header><div class="pad goalwrap">';
+    if (G.admin && G.total) h += goalBar('Ukupno (svi prodavači)', G.total.goal, G.total.cur, G.total.prev, true);
+    G.rows.filter((r) => r.goal > 0 || !G.admin).forEach((r) => { h += goalBar(r.name, r.goal, r.cur, r.prev, false); });
+    el.innerHTML = h + '</div>';
+  }
+  async function saveGoals() {
+    const goals = {}; document.querySelectorAll('[data-goal]').forEach((i) => { goals[i.dataset.goal] = Number(i.value) || 0; });
+    const ok = await safe(() => call('goals_save', { goals }), 'Ciljevi spremljeni');
+    if (ok) { S.goals = null; loadGoals(true); }
+  }
+  function goalSettingsHtml() {
+    if (!S.goals && !S.goalBusy && !S.goalTried) { S.goalTried = true; loadGoals(true).then(() => { if (S.tab === 'postavke') renderSettings(); }); }
+    const sellers = S.users.filter((u) => u.role === 'sales' && u.active);
+    const cur = (S.goals && S.goals.rows) || [];
+    return '<section class="panel-b"><header><h3>Tjedni cilj prihoda</h3><span class="muted">u eurima po prodavaču; prikazuje se na Pregledu</span></header><div class="pad">' +
+      (sellers.length ? '<div class="grid2">' + sellers.map((u) => { const r = cur.find((x) => x.userId === u.id); return '<label class="f">' + esc(u.name) + ' (€ tjedno)<input type="number" min="0" step="50" inputmode="decimal" data-goal="' + esc(u.id) + '" value="' + esc(r && r.goal ? r.goal : '') + '"></label>'; }).join('') + '</div>' : '<p class="muted">Nema aktivnih prodavača.</p>') +
+      '<div class="row-btns start"><button class="btn primary" data-act="goalsave">Spremi ciljeve</button></div><p class="hint">Svaki prodavač vidi samo svoj cilj i napredak, a administrator vidi svakog prodavača i zbroj.</p></div></section>';
+  }
+  /* pretraga kroz sve: klijenti, bilješke i poruke */
+  let gTimer = null, gSeq = 0;
+  async function globalSearch(q) {
+    const box = $('gres'); if (!box) return;
+    q = q.trim();
+    if (q.length < 2) { box.hidden = true; box.innerHTML = ''; return; }
+    const seq = ++gSeq; let r;
+    try { r = await call('search&q=' + encodeURIComponent(q), null, 'GET'); } catch (e) { return; }
+    if (seq !== gSeq) return;
+    const sec = (title, items) => items.length ? '<div class="gh">' + title + '</div>' + items.join('') : '';
+    const noteLbl = { note: 'bilješka', call: 'poziv', meeting: 'sastanak', email: 'e-mail', inmail: 'e-mail', status: 'status' };
+    const h = sec('Klijenti', r.clients.map((c) => '<button type="button" class="gi" data-gopen="' + esc(c.id) + '"><b>' + esc(c.name) + '</b><small>' + esc((c.contact || '') + (c.email ? ' · ' + c.email : '')) + '</small></button>')) +
+      sec('Bilješke', r.notes.map((n) => '<button type="button" class="gi" data-gopen="' + esc(n.clientId) + '"><b>' + esc(n.client) + ' <span class="tag">' + esc(noteLbl[n.type] || n.type) + '</span></b><small>' + esc(n.snip) + '</small></button>')) +
+      sec('Poruke', r.emails.map((m) => '<button type="button" class="gi" data-gmail="' + esc(m.id) + '"><b>' + esc(m.subject || '(bez predmeta)') + ' <span class="tag">' + (m.dir === 'in' ? 'primljeno' : 'poslano') + '</span></b><small>' + esc(m.who) + ' · ' + esc(m.snip) + '</small></button>'));
+    box.innerHTML = h || '<div class="gh">Nema rezultata za „' + esc(q) + '“.</div>'; box.hidden = false;
+  }
+  function globalSearchClose() { const b = $('gres'); if (b) { b.hidden = true; } }
+  /* upozorenje o mogućem duplikatu: isti OIB, isti e-mail ili sličan naziv */
+  const nameKey = (n) => String(n || '').toLowerCase().replace(/dž/g, 'dz').replace(/[čć]/g, 'c').replace(/ž/g, 'z').replace(/š/g, 's').replace(/đ/g, 'd').replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w && !['doo', 'jdoo', 'dd', 'obrt', 'vl', 'vlasnik', 'ltd', 'gmbh', 'd', 'o', 'j', 'sa', 'za', 'i'].includes(w)).join(' ');
+  function findDupes(name, oib, email) {
+    const nk = nameKey(name), em = String(email || '').trim().toLowerCase(), ob = String(oib || '').trim(); const out = [];
+    S.clients.forEach((c) => {
+      const why = [];
+      if (ob.length >= 8 && c.oib === ob) why.push('isti OIB');
+      if (em && String(c.email || '').toLowerCase() === em) why.push('isti e-mail');
+      const ck = nameKey(c.name);
+      if (nk.length >= 4 && ck.length >= 4 && (ck === nk || (Math.min(ck.length, nk.length) >= 5 && (ck.includes(nk) || nk.includes(ck))))) why.push('sličan naziv');
+      if (why.length) out.push({ c, why });
+    });
+    return out.slice(0, 5);
+  }
+  function checkDupes() {
+    const box = $('nDup'); if (!box) return;
+    const d = findDupes($('nName').value, $('nOib').value, $('nEmail').value);
+    if (!d.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.innerHTML = '<div><b>Moguć duplikat:</b> ' + d.map((x) => '<button type="button" class="lnk" data-open="' + esc(x.c.id) + '">' + esc(x.c.name) + '</button> (' + esc(x.why.join(', ')) + (x.c.ownerId ? ', prodavač: ' + esc(person(x.c.ownerId)) : '') + ')').join('; ') + '. Provjerite prije spremanja; spremanje je i dalje moguće.</div>';
+    box.hidden = false;
+  }
   function openNew(prefill) {
     S.lastFocus = document.activeElement;
     ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nPhone', 'nValue', 'nFollow', 'nFollowT', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
-    $('nCamp').checked = false; $('nCampDates').hidden = true; $('nVKind').value = 'ponudeno';
+    $('nCamp').checked = false; $('nCampDates').hidden = true; $('nVKind').value = 'ponudeno'; if ($('nDup')) { $('nDup').hidden = true; $('nDup').innerHTML = ''; }
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
     $('nHint').hidden = !prefill; applyNewKind();
@@ -1448,7 +1544,7 @@ function initApp() {
     if (prefill) { $('nEmail').value = prefill.email || ''; $('nNote').value = prefill.note || ''; }
     $('nMsg').textContent = '';
     $('mNew').hidden = false; document.body.classList.add('lock');
-    $('nName').focus();
+    $('nName').focus(); setTimeout(checkDupes, 0);
   }
   async function submitNew(ev) {
     ev.preventDefault();
@@ -1801,6 +1897,9 @@ function initApp() {
   /* ---------- events ---------- */
   document.addEventListener('click', (ev) => {
     const t = ev.target;
+    const go = t.closest('[data-gopen]'); if (go) { globalSearchClose(); $('gq').value = ''; openClient(go.dataset.gopen); return; }
+    const gm = t.closest('[data-gmail]'); if (gm) { globalSearchClose(); $('gq').value = ''; openMailItem(gm.dataset.gmail); return; }
+    if (!t.closest('.gsearch')) globalSearchClose();
     const tab = t.closest('[data-tab]'); if (tab) { setTab(tab.dataset.tab); return; }
     const per = t.closest('[data-period]'); if (per) { S.period = per.dataset.period; S.tmFrom = ''; S.tmTo = ''; renderTeam(); return; }
     const mailBtn = t.closest('[data-mail]'); if (mailBtn) { openMailItem(mailBtn.dataset.mail); return; }
@@ -1824,6 +1923,8 @@ function initApp() {
       else if (act === 'taskopen') taskOpen(a.dataset.id);
       else if (act.indexOf('tk_') === 0) taskDetailAct(act, a);
       else if (act === 'tkfilter') { S.tkFilter = a.dataset.v; renderTasksTab(); }
+      else if (act === 'goalsave') saveGoals();
+      else if (act === 'tkmore') { S.tkMore = !S.tkMore; renderOverview(); }
       else if (act === 'revmore') { S.revMore = !S.revMore; renderRevenue(); }
       else if (act === 'revper') { S.revPeriod = a.dataset.v; renderRevenue(); }
       else if (act === 'mail') openMail('Prvi');
@@ -1868,6 +1969,7 @@ function initApp() {
       else if (act === 'ipunblock') ipUnblock(a.dataset.ip);
       else if (act === 'aldone') alertDone(a.dataset.id);
       else if (act === 'alrenew') alertRenew(a.dataset.id);
+      else if (act === 'alextend') alertExtend(a.dataset.id);
       else if (act === 'dncadd') dncAdd();
       else if (act === 'dncrm') dncRemove(a.dataset.id);
       else if (act === 'dnccl') dncClient(a.dataset.id);
@@ -1889,6 +1991,7 @@ function initApp() {
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
     else if (ev.target.name === 'nKindR') applyNewKind();
     else if (ev.target.dataset && ev.target.dataset.f === 'send_mode') { const r = ev.target.closest('.tplrow'); r.querySelectorAll('[data-sch]').forEach((x) => { x.hidden = x.dataset.sch !== ev.target.value; }); }
+    else if (id === 'rTpl') replyApplyTpl();
     else if (id === 'cMulti') setMulti(ev.target.checked);
     else if (id === 'cCamp' || id === 'iCamp' || id === 'nCamp') { const p = id[0]; $(p + 'CampDates').hidden = !ev.target.checked; if (ev.target.checked && !$(p + 'CampStart').value) $(p + 'CampStart').value = today(); }
     else if (id === 'mWhen') { const l = ev.target.value === 'later'; $('mAtW').hidden = !l; $('mSend').textContent = l ? 'Zakaži slanje' : 'Pošalji e-mail'; }
@@ -1904,6 +2007,8 @@ function initApp() {
   document.addEventListener('input', (ev) => {
     if (ev.target.id === 'fq') { S.q = ev.target.value; renderClients(); }
     else if (ev.target.id === 'iq') { S.iq = ev.target.value; renderInbox(); }
+    else if (ev.target.id === 'nName' || ev.target.id === 'nOib' || ev.target.id === 'nEmail') checkDupes();
+    else if (ev.target.id === 'gq') { clearTimeout(gTimer); const v = ev.target.value; gTimer = setTimeout(() => globalSearch(v), 250); }
   });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && (!$('drawer').hidden || !$('mdrawer').hidden || !$('mNew').hidden || !$('mMail').hidden || !$('toolModal').hidden)) closeTop(); });
   $('toolModal').addEventListener('click', toolClick);
