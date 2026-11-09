@@ -79,7 +79,7 @@ function need_admin(array $u): void
 function f_campaign(array $in): array
 {
     if (empty($in['camp_active'])) {
-        return [0, null, null, '0.00'];
+        return [0, null, null, '0.00', 'jednokratno'];
     }
     $end = f_date($in['camp_end'] ?? '');
     if ($end === null) {
@@ -92,7 +92,7 @@ function f_campaign(array $in): array
     if (!isset($in['camp_value']) || trim((string) $in['camp_value']) === '') {
         throw new ApiError('Upišite novčanu vrijednost kampanje.');
     }
-    return [1, $start, $end, f_value($in['camp_value'])];
+    return [1, $start, $end, f_value($in['camp_value']), (($in['camp_type'] ?? '') === 'godisnji') ? 'godisnji' : 'jednokratno'];
 }
 
 /** Sat sljedećeg kontakta (HH:MM) ili null. */
@@ -152,6 +152,7 @@ function client_out(array $r): array
         'campStart' => !empty($r['camp_start']) ? (string) $r['camp_start'] : '',
         'campEnd' => !empty($r['camp_end']) ? (string) $r['camp_end'] : '',
         'campValue' => (float) ($r['camp_value'] ?? 0),
+        'campType' => (string) (($r['camp_type'] ?? '') === 'godisnji' ? 'godisnji' : 'jednokratno'),
         'multiCamp' => (int) ($r['multi_camp'] ?? 0) === 1,
         'createdAt' => (int) $r['created_at'],
         'updatedAt' => (int) $r['updated_at'],
@@ -637,7 +638,7 @@ try {
                 'alerts' => $alertsOut,
                 'dnc' => array_map(static fn ($r) => (string) $r['email'], rows('SELECT email FROM do_not_contact')),
                 'ownerHist' => array_map(static fn ($r) => [(string) $r['client_id'], (int) $r['from_at'], (string) $r['owner_id']], rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id')),
-                'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value'], 'title' => (string) ($r['title'] ?? '')], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
+                'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value'], 'title' => (string) ($r['title'] ?? ''), 'type' => (string) (($r['camp_type'] ?? '') === 'godisnji' ? 'godisnji' : 'jednokratno')], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
                 'templates' => $templates,
                 'scheduled' => $scheduled,
@@ -675,7 +676,7 @@ try {
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
             $fu = f_date($in['next_follow_up'] ?? '');
             $fut = $fu ? f_time($in['next_follow_time'] ?? '') : null;
-            [$campA, $campS, $campE, $campV] = f_campaign($in);
+            [$campA, $campS, $campE, $campV, $campT] = f_campaign($in);
             if ($campA === 1) {
                 $status = 'aktivni';
             }
@@ -691,6 +692,7 @@ try {
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
                 return $cid;
             });
+            run('UPDATE clients SET camp_type = ? WHERE id = ?', [$campT, $id]);
             link_emails_to_client($id, strtolower($email));
             if ($mailId !== null) {
                 run('UPDATE emails SET client_id = ? WHERE id = ? AND client_id IS NULL', [$id, $mailId]);
@@ -723,12 +725,12 @@ try {
             if ((int) ($c['multi_camp'] ?? 0) !== 1) {
                 throw new ApiError('Više istovremenih kampanja moguće je samo za klijenta označenog kao marketing agencija.');
             }
-            [, $ns, $ne, $nv] = f_campaign(['camp_active' => 1, 'camp_start' => $in['start'] ?? '', 'camp_end' => $in['end'] ?? '', 'camp_value' => $in['value'] ?? '']);
+            [, $ns, $ne, $nv, $nt] = f_campaign(['camp_active' => 1, 'camp_start' => $in['start'] ?? '', 'camp_end' => $in['end'] ?? '', 'camp_value' => $in['value'] ?? '', 'camp_type' => $in['type'] ?? '']);
             $title = mb_substr(trim((string) ($in['title'] ?? '')), 0, 190);
             $t = ms();
-            transaction(static function () use ($c, $u, $ns, $ne, $nv, $title, $t): void {
-                run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$c['id'], $ns, $ne, $nv, $u['id'], $t, (string) ($c['service'] ?? ''), $c['owner_id'] ?? null, $title]);
+            transaction(static function () use ($c, $u, $ns, $ne, $nv, $nt, $title, $t): void {
+                run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id, title, camp_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$c['id'], $ns, $ne, $nv, $u['id'], $t, (string) ($c['service'] ?? ''), $c['owner_id'] ?? null, $title, $nt]);
                 mark_client_active($c, (int) $u['id'], $t);
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
                     [$c['id'], $u['id'], 'note', 'Dodatna kampanja' . ($title !== '' ? ' „' . $title . '“' : '') . ': ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', vrijednost ' . number_format((float) $nv, 2, ',', '.') . ' €', $t]);
@@ -828,14 +830,14 @@ try {
             $u = need_write();
             $in = body();
             $c = load_client((string) ($in['client_id'] ?? ''));
-            [, $ns, $ne, $nv] = f_campaign(['camp_active' => 1, 'camp_start' => $in['start'] ?? '', 'camp_end' => $in['end'] ?? '', 'camp_value' => $in['value'] ?? '']);
+            [, $ns, $ne, $nv, $nt] = f_campaign(['camp_active' => 1, 'camp_start' => $in['start'] ?? '', 'camp_end' => $in['end'] ?? '', 'camp_value' => $in['value'] ?? '', 'camp_type' => $in['type'] ?? '']);
             if ((int) $c['camp_active'] === 1 && !empty($c['camp_end']) && $c['camp_end'] >= date('Y-m-d')) {
                 throw new ApiError('Kampanja još traje. Nova se upisuje nakon završetka ili odznačite Aktivni.');
             }
             $t = ms();
-            transaction(static function () use ($c, $u, $ns, $ne, $nv, $t): void {
+            transaction(static function () use ($c, $u, $ns, $ne, $nv, $nt, $t): void {
                 archive_campaign($c, (int) $u['id']);
-                run('UPDATE clients SET camp_active = 1, camp_start = ?, camp_end = ?, camp_value = ?, updated_at = ? WHERE id = ?', [$ns, $ne, $nv, $t, $c['id']]);
+                run('UPDATE clients SET camp_active = 1, camp_start = ?, camp_end = ?, camp_value = ?, camp_type = ?, updated_at = ? WHERE id = ?', [$ns, $ne, $nv, $nt, $t, $c['id']]);
                 mark_client_active($c, (int) $u['id'], $t);
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
                     [$c['id'], $u['id'], 'note', 'Nova kampanja: ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', vrijednost ' . number_format((float) $nv, 2, ',', '.') . ' €', $t]);
@@ -881,12 +883,12 @@ try {
                 $newVals['contract_end'] = !empty($in['has_contract']) ? f_date($in['contract_end'] ?? '') : '';
             }
             if (array_key_exists('camp_active', $in)) {
-                [$campA, $campS, $campE, $campV] = f_campaign($in);
+                [$campA, $campS, $campE, $campV, $campT] = f_campaign($in);
                 $newVals += ['camp_active' => $campA, 'camp_start' => $campS, 'camp_end' => $campE, 'camp_value' => $campV];
                 if ($campA === 0 && (int) $c['camp_active'] === 1) {
                     archive_campaign($c, (int) $u['id']); // kampanja je završena ili prekinuta: ostaje u povijesti
                 }
-                run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $c['id']]);
+                run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ?, camp_type = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $campT, $c['id']]);
                 if ($campA === 1) {
                     mark_client_active($c, (int) $u['id'], ms());
                 }
@@ -976,11 +978,11 @@ try {
                     run('UPDATE clients SET value = ?, value_kind = ? WHERE id = ?', [$value, $vkind, $c['id']]);
                 }
                 if ($camp !== null) {
-                    [$campA, $campS, $campE, $campV] = $camp;
+                    [$campA, $campS, $campE, $campV, $campT] = $camp;
                     if ($campA === 0 && (int) $c['camp_active'] === 1) {
                         archive_campaign($c, (int) $u['id']);
                     }
-                    run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $c['id']]);
+                    run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ?, camp_type = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $campT, $c['id']]);
                     if ($campA === 1) {
                         mark_client_active($c, (int) $u['id'], $t);
                     }
