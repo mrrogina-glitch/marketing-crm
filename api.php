@@ -126,6 +126,7 @@ function client_out(array $r): array
         'email' => (string) $r['email'],
         'phone' => (string) $r['phone'],
         'service' => (string) $r['service'],
+        'industry' => (string) ($r['industry'] ?? ''),
         'value' => (float) $r['value'],
         'status' => (string) $r['status'],
         'ownerId' => $r['owner_id'] !== null ? (string) $r['owner_id'] : null,
@@ -573,6 +574,7 @@ try {
             $email = f_email($in, 'email');
             $phone = f_str($in, 'phone', 60, 'Telefon');
             $service = f_services($in['service'] ?? '');
+            $industry = f_str($in, 'industry', 120, 'Djelatnost');
             $value = f_value($in['value'] ?? 0);
             $status = f_status($in['status'] ?? 'novi');
             $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
@@ -584,10 +586,10 @@ try {
             $note = f_text($in, 'note', 'Prva bilješka');
             $mailId = !empty($in['email_id']) ? (int) load_email((string) $in['email_id'])['id'] : null;
             $t = ms();
-            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $note, $t, $u, $campA, $campS, $campE, $campV): int {
-                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE, $campV]);
+            $id = transaction(static function () use ($kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $status, $owner, $fu, $note, $t, $u, $campA, $campS, $campE, $campV): int {
+                run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, industry, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $status, $owner, $fu, $status === 'dobiven' ? $t : null, $u['id'], $t, $t, $campA, $campS, $campE, $campV]);
                 $cid = insert_id();
                 record_owner($cid, (int) $owner, $t);
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
@@ -633,15 +635,16 @@ try {
             $email = f_email($in, 'email');
             $phone = f_str($in, 'phone', 60, 'Telefon');
             $service = f_services($in['service'] ?? '');
+            $industry = array_key_exists('industry', $in) ? f_str($in, 'industry', 120, 'Djelatnost') : (string) ($c['industry'] ?? '');
             $value = f_value($in['value'] ?? 0);
             $owner = active_user_id($in['owner_id'] ?? null, (int) ($c['owner_id'] ?? $u['id']));
             $fu = f_date($in['next_follow_up'] ?? '');
-            run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
-                [$kind, $oib, $name, $contact, $email, $phone, $service, $value, $owner, $fu, ms(), $c['id']]);
+            run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, industry = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
+                [$kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $owner, $fu, ms(), $c['id']]);
             if ((int) $owner !== (int) $c['owner_id']) {
                 record_owner((int) $c['id'], (int) $owner, ms());
             }
-            $newVals = ['kind' => $kind, 'name' => $name, 'contact' => $contact, 'oib' => $oib, 'email' => $email, 'phone' => $phone, 'service' => $service, 'value' => $value, 'owner_id' => $owner, 'next_follow_up' => $fu];
+            $newVals = ['kind' => $kind, 'name' => $name, 'contact' => $contact, 'oib' => $oib, 'email' => $email, 'phone' => $phone, 'service' => $service, 'industry' => $industry, 'value' => $value, 'owner_id' => $owner, 'next_follow_up' => $fu];
             if (array_key_exists('camp_active', $in)) {
                 [$campA, $campS, $campE, $campV] = f_campaign($in);
                 $newVals += ['camp_active' => $campA, 'camp_start' => $campS, 'camp_end' => $campE, 'camp_value' => $campV];
@@ -1449,10 +1452,11 @@ try {
                     $val = (string) ($rec['value'] ?? '');
                     $val = num_hr($val);
                     $svc = f_services((string) ($rec['service'] ?? ''));
+                    $ind = mb_substr(trim((string) ($rec['industry'] ?? '')), 0, 120);
                     $note = 'Uvezeno iz datoteke ' . mb_substr((string) $j['name'], 0, 80) . '.' . (!empty($rec['note']) ? "\n" . mb_substr((string) $rec['note'], 0, 1500) : '');
-                    run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, NULL, NULL, 0)',
-                        [$kind, (string) ($rec['oib_fixed'] ?? ''), $name, $contact, strtolower((string) ($rec['email'] ?? '')), mb_substr((string) ($rec['phone'] ?? ''), 0, 60), $svc, $val, $status, $owner, $status === 'dobiven' ? $t : null, $u['id'], $t, $t]);
+                    run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, industry, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, NULL, NULL, 0)',
+                        [$kind, (string) ($rec['oib_fixed'] ?? ''), $name, $contact, strtolower((string) ($rec['email'] ?? '')), mb_substr((string) ($rec['phone'] ?? ''), 0, 60), $svc, $ind, $val, $status, $owner, $status === 'dobiven' ? $t : null, $u['id'], $t, $t]);
                     $cid = insert_id();
                     record_owner($cid, (int) $owner, $t);
                     run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);

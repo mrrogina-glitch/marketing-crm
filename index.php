@@ -76,6 +76,8 @@ $v = static function (string $f): string {
       <label class="f">Status<select id="fStatus"></select></label>
       <label class="f">Prodavač<select id="fOwner"></select></label>
       <label class="f">Vrsta<select id="fKind"><option value="">Sve vrste</option><option value="tvrtka">Tvrtke</option><option value="osoba">Fizičke osobe</option></select></label>
+      <label class="f">Djelatnost<select id="fIndustry"></select></label>
+      <datalist id="industryList"></datalist>
       <label class="f">Poredak<select id="fSort">
         <option value="activity">Zadnja aktivnost</option>
         <option value="follow">Sljedeći kontakt</option>
@@ -138,6 +140,7 @@ $v = static function (string $f): string {
         <label class="f">OIB<input id="nOib" inputmode="numeric" maxlength="11" autocomplete="off" placeholder="neobavezno"></label>
         <label class="f">E-mail<input id="nEmail" type="email" autocomplete="off"></label>
         <label class="f">Telefon<input id="nPhone" type="tel" autocomplete="off"></label>
+        <label class="f">Djelatnost<input id="nIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću"></label>
         <div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="nService"></div></div>
         <label class="f">Procijenjena vrijednost (€)<input id="nValue" type="number" min="0" step="50" inputmode="numeric"></label>
         <label class="f">Status<select id="nStatus"></select></label>
