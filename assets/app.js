@@ -2111,7 +2111,19 @@ function initApp() {
   setInterval(presencePing, 45000);
   setTimeout(presencePing, 3000);
 }
-})();
 document.addEventListener('change', (e) => {
   if (e.target && e.target.id === 'nVKind') { const r = document.getElementById('nValReq'); if (r) r.hidden = !e.target.value; }
 });
+
+document.addEventListener('change', (e) => {
+  const t = e.target; if (!t) return;
+  if (t.id === 'nCamp' || t.id === 'cCamp') {
+    const sel = document.getElementById(t.id === 'nCamp' ? 'nVKind' : 'noteVKind');
+    if (sel && t.checked) { sel.value = 'ugovoreno'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
+  if ((t.id === 'nVKind' || t.id === 'noteVKind') && t.value === 'ponudeno') {
+    const cb = document.getElementById(t.id === 'nVKind' ? 'nCamp' : 'cCamp');
+    if (cb && cb.checked) { t.value = 'ugovoreno'; const tt = document.getElementById('toast'); if (tt) { tt.textContent = 'Klijent s aktivnom kampanjom mora imati vrstu vrijednosti Ugovoreno.'; tt.className = 'toast bad'; tt.hidden = false; setTimeout(() => { tt.hidden = true; }, 4500); } }
+  }
+});
+})();
