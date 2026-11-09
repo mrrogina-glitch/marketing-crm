@@ -901,3 +901,8 @@ b.up{color:#047857}b.down{color:#b91c1c}
 .chipbtn:hover{background:#e8f0ff;border-color:#8fb0f0}
 .rsavetpl{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .tkassign{display:flex;gap:8px;align-items:end;margin:10px 0}
+
+/* v7: tablice u Postavkama se ne šire izvan ekrana */
+#bkPanel .pad{overflow-x:auto}
+#bkPanel .tbl{width:100%;max-width:100%}
+#bkPanel .tbl td,#bkPanel .tbl th{white-space:normal;overflow-wrap:anywhere}
