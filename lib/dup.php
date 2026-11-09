@@ -272,6 +272,7 @@ const IMPORT_MAP = [
     'name' => ['naziv', 'nazivtvrtke', 'tvrtka', 'ime', 'imeiprezime', 'klijent', 'firma', 'name', 'company', 'nazivklijenta', 'nazivpoduzeca'],
     'contact' => ['kontakt', 'kontaktosoba', 'osoba', 'contact', 'kontaktnaosoba'],
     'oib' => ['oib'],
+    'address' => ['adresa', 'lokacija', 'address', 'adresasjedišta', 'sjedište'],
     'email' => ['email', 'e-mail', 'mail', 'emailadresa', 'e-mailadresa', 'epošta', 'eposta'],
     'phone' => ['telefon', 'tel', 'mobitel', 'gsm', 'phone', 'mob', 'brojtelefona'],
     'service' => ['usluga', 'usluge', 'service'],
