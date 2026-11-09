@@ -664,7 +664,7 @@ function initApp() {
       return '<button class="crow st-' + esc(c.status) + '" data-open="' + esc(c.id) + '">' +
         '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">' + (c.campType === 'godisnji' ? 'ugovor do ' : 'kampanja do ') + esc(fmtYmd(c.campEnd)) + '</span>' : '') + (c.hasContract ? ' <span class="chip ' + (c.contractEnd && c.contractEnd < today() ? 'short' : 'camp') + '">ugovor' + (c.contractEnd ? ' do ' + esc(fmtYmd(c.contractEnd)) : '') + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
         '<span class="c-svc">' + esc(c.service) + '</span><span class="c-st">' + pill(c.status) + '</span>' +
-        '<span class="c-val">' + (c.value ? eur(c.value) + '<small>' + (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + '</small>' : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +
+        '<span class="c-val">' + (c.value ? eur(c.value) + '<small>' + (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'pregovori') + '</small>' : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +
         '<span class="c-note' + (st ? ' flag-stale' : '') + '" data-l="Zadnji kontakt:">' + esc(t ? rel(t) : 'nema bilješki') + '</span>' +
         '<span class="c-next' + (du ? ' flag-late' : '') + '" data-l="Javiti se:">' + (c.nextFollowUp ? fmtYmd(c.nextFollowUp) + (c.nextFollowTime ? ' ' + esc(c.nextFollowTime) : '') : '–') + '</span></button>';
     }).join('');
@@ -1336,7 +1336,7 @@ function initApp() {
       '<label class="f">Sljedeći kontakt (datum)<input id="noteFollow" type="date"' + (c.nextFollowUp ? ' value="' + esc(c.nextFollowUp) + '"' : '') + '></label>' +
       '<label class="f">Sat sljedećeg kontakta<input id="noteFollowT" type="time"' + (c.nextFollowTime ? ' value="' + esc(c.nextFollowTime) + '"' : '') + '></label>' +
       '<label class="f">Vrijednost (€)<input id="noteValue" type="number" min="0" step="50" inputmode="decimal" value="' + esc(c.value || '') + '"></label>' +
-      '<label class="f">Status<select id="noteVKind"><option value="ponudeno"' + (c.valueKind !== 'ugovoreno' ? ' selected' : '') + '>Ponuđeno</option><option value="ugovoreno"' + (c.valueKind === 'ugovoreno' ? ' selected' : '') + '>Ugovoreno</option></select></label></div><textarea id="noteText" placeholder="Što je dogovoreno ili napravljeno, i koji je sljedeći korak."></textarea>' +
+      '<label class="f">Status<select id="noteVKind"><option value="ponudeno"' + (c.valueKind !== 'ugovoreno' ? ' selected' : '') + '>Pregovori</option><option value="ugovoreno"' + (c.valueKind === 'ugovoreno' ? ' selected' : '') + '>Ugovoreno</option></select></label></div><textarea id="noteText" placeholder="Što je dogovoreno ili napravljeno, i koji je sljedeći korak."></textarea>' +
       '<div class="f wide campbox"><label class="chk"><input type="checkbox" id="cCamp"' + (c.campActive ? ' checked' : '') + '> Aktivni: klijent ima aktivnu kampanju</label>' +
       '<div class="grid2" id="cCampDates"' + (c.campActive ? '' : ' hidden') + '>' + campTypeSel('cCampType', c.campType) + '<label class="f">Kampanja od<input id="cCampStart" type="date" value="' + esc(c.campStart) + '"></label><label class="f">Aktivna do <span class="req">*</span><input id="cCampEnd" type="date" value="' + esc(c.campEnd) + '"></label>' +
       '<label class="f">Vrijednost (€) <span class="req">*</span><input id="cCampValue" type="number" min="0" step="10" inputmode="decimal" value="' + esc(c.campValue || '') + '"></label></div>' +
@@ -1431,7 +1431,7 @@ function initApp() {
     const fu = $('noteFollow').value, fut = $('noteFollowT').value;
     if (fu && (fu !== c.nextFollowUp || fut !== (c.nextFollowTime || ''))) { body.next_follow_up = fu; body.next_follow_time = fut; }
     const nv = $('noteValue').value, nk = $('noteVKind').value;
-    if (nk !== (c.valueKind || 'ponudeno') && !$('cCamp').checked && !(Number(nv) > 0)) { $('noteMsg').textContent = 'Za status (' + (nk === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('noteValue').focus(); return; }
+    if (nk !== (c.valueKind || 'ponudeno') && !$('cCamp').checked && !(Number(nv) > 0)) { $('noteMsg').textContent = 'Za status (' + (nk === 'ugovoreno' ? 'ugovoreno' : 'pregovori') + ') upišite Vrijednost (€).'; $('noteValue').focus(); return; }
     if (nv !== '' && (Number(nv) !== Number(c.value || 0) || nk !== (c.valueKind || 'ponudeno'))) { body.value = Number(nv); body.value_kind = nk; }
     const on = $('cCamp').checked, cs = $('cCampStart').value, ce = $('cCampEnd').value, cv = $('cCampValue').value;
     const ct = $('cCampType').value; const campChanged = on !== !!c.campActive || (on && (ct !== (c.campType || 'jednokratno') || ce !== (c.campEnd || '') || (cs || '') !== (c.campStart || '') || annAmount('cCampType').value !== Number(c.campValue || 0) || (ct === 'godisnji' && annAmount('cCampType').months !== (c.campMonths || 12))));
@@ -1662,7 +1662,7 @@ function initApp() {
     if (oib && !/^\d{11}$/.test(oib)) { m.textContent = 'OIB mora imati 11 znamenki.'; $('nOib').focus(); return; }
     if (email && email.indexOf('@') < 1) { m.textContent = 'E-mail adresa nije ispravna.'; $('nEmail').focus(); return; }
     if ($('nEmail2').value.trim() && $('nEmail2').value.indexOf('@') < 1) { m.textContent = 'Dodatna e-mail adresa nije ispravna.'; $('nEmail2').focus(); return; }
-    if ($('nVKind').value && !$('nCamp').checked && !(Number($('nValue').value) > 0)) { m.textContent = 'Za status (' + ($('nVKind').value === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('nValue').focus(); return; }
+    if ($('nVKind').value && !$('nCamp').checked && !(Number($('nValue').value) > 0)) { m.textContent = 'Za status (' + ($('nVKind').value === 'ugovoreno' ? 'ugovoreno' : 'pregovori') + ') upišite Vrijednost (€).'; $('nValue').focus(); return; }
     if (note.length < 3) { m.textContent = 'Prva bilješka je obavezna.'; $('nNote').focus(); return; }
     if ($('nCamp').checked && !$('nCampEnd').value) { m.textContent = 'Odaberite točan datum do kada je kampanja aktivna.'; $('nCampEnd').focus(); return; }
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
