@@ -294,11 +294,29 @@ function record_client_email(array $c, array $u, string $to, string $subject, st
 
 const BULK_BURST = 5;  // najviše toliko grupnih poruka po jednom pokretanju
 
-/** Ograničenja grupne pošte: 45 na sat, termin 02–19 sati (config.php 'bulk' služi samo za testiranje). */
+/** Ograničenja grupne pošte (config.php 'bulk' služi samo za testiranje): slanje je dopušteno cijeli dan, a brzina ovisi o satu. */
 function bulk_cfg(string $k): int
 {
-    $def = ['per_hour' => 45, 'from' => 2, 'to' => 19];
+    $def = ['per_hour' => 55, 'from' => 0, 'to' => 24];
     return (int) cfg('bulk.' . $k, $def[$k]);
+}
+
+/** Najviše grupnih poruka na sat: 30 u razdoblju 09–15 sati, 55 u razdoblju 16–08 sati. */
+function bulk_rate(?int $tsMs = null): int
+{
+    $o = cfg('bulk.per_hour', null);
+    if ($o !== null) {
+        return (int) $o;
+    }
+    $h = (int) date('G', intdiv($tsMs ?? ms(), 1000));
+    return ($h >= 9 && $h < 16) ? 30 : 55;
+}
+
+/** Pojedinačne poruke (odgovori iz Inboxa, e-mail klijentu) imaju prednost: troše sat prije grupne pošte. */
+function bulk_individual_last_hour(): int
+{
+    $all = (int) row("SELECT COUNT(*) AS c FROM emails WHERE direction = 'out' AND auto = 0 AND created_at > ?", [ms() - 3600000])['c'];
+    return max(0, $all - bulk_sent_last_hour());
 }
 
 function bulk_window_open(?int $tsMs = null): bool
@@ -315,7 +333,7 @@ function bulk_sent_last_hour(): int
 /** Koliko se grupnih poruka smije poslati upravo sada (0 izvan termina ili kad je sat pun). */
 function bulk_quota_now(): int
 {
-    return bulk_window_open() ? max(0, bulk_cfg('per_hour') - bulk_sent_last_hour()) : 0;
+    return bulk_window_open() ? max(0, bulk_rate() - bulk_sent_last_hour() - bulk_individual_last_hour()) : 0;
 }
 
 /** Procjena kada će se poslati zadnja od $n grupnih poruka (ms). */
@@ -329,7 +347,7 @@ function bulk_eta(int $n): int
     $first = true;
     for ($i = 0; $i < 24 * 60 && $left > 0; $i++) {
         if (bulk_window_open($t * 1000)) {
-            $cap = $first ? max(0, bulk_cfg('per_hour') - bulk_sent_last_hour()) : bulk_cfg('per_hour');
+            $cap = $first ? max(0, bulk_rate($t * 1000) - bulk_sent_last_hour() - bulk_individual_last_hour()) : bulk_rate($t * 1000);
             $left -= $cap;
             $first = false;
             if ($left <= 0) {
@@ -371,7 +389,7 @@ function process_scheduled(): int
     run("UPDATE scheduled_emails SET status = 'failed', error = ? WHERE status = 'sending' AND send_at < ?",
         ['Slanje je prekinuto. Provjerite mapu Poslano i po potrebi zakažite ponovno.', ms() - 1800000]);
     $due = rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND bulk = 0 AND send_at <= ? ORDER BY send_at LIMIT 20", [ms()]);
-    // grupna pošta: najviše bulk_cfg('per_hour') na sat i samo u terminu bulk_cfg('from')–bulk_cfg('to') sati
+    // grupna pošta: najviše bulk_rate() na sat (30 u 09–15 h, 55 u 16–08 h), nakon pojedinačnih poruka koje imaju prednost
     $quota = min(BULK_BURST, bulk_quota_now());
     if ($quota > 0) {
         $due = array_merge($due, rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND bulk = 1 AND send_at <= ? ORDER BY send_at, id LIMIT " . (int) $quota, [ms()]));
