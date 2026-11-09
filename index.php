@@ -63,7 +63,7 @@ $v = static function (string $f): string {
     <div class="bar-r">
       <div class="gsearch"><input id="gq" type="search" placeholder="Traži klijente, bilješke, poruke…" autocomplete="off" aria-label="Pretraga kroz sve" maxlength="80"><div class="gres" id="gres" hidden></div></div>
       <button class="btn primary" id="btnNew" data-act="new">Novi klijent</button>
-      <div class="me"><span id="meName"></span><button class="btn sm" data-act="logout">Odjava</button></div>
+      <div class="me"><span id="meName"></span><a class="btn sm" id="bkTop" href="api.php?a=backup_latest" download hidden title="Preuzmi najnoviju sigurnosnu kopiju">⬇ Backup</a><button class="btn sm" data-act="logout">Odjava</button></div>
     </div>
   </div>
 </header>
@@ -74,11 +74,15 @@ $v = static function (string $f): string {
 
   <section class="view" id="v-klijenti" role="tabpanel" aria-labelledby="t-klijenti" hidden>
     <div class="toolbar">
-      <label class="f">Pretraga<input id="fq" type="search" placeholder="Tvrtka, osoba, e-mail" autocomplete="off"></label>
+      <label class="f">Pretraga<input id="fq" type="search" placeholder="Tvrtka, OIB, e-mail, bilješka" autocomplete="off"></label>
       <label class="f">Status<select id="fStatus"></select></label>
       <label class="f">Prodavač<select id="fOwner"></select></label>
       <label class="f">Vrsta<select id="fKind"><option value="">Sve vrste</option><option value="tvrtka">Tvrtke</option><option value="osoba">Fizičke osobe</option></select></label>
       <label class="f">Djelatnost<select id="fIndustry"></select></label>
+      <label class="f">Vrijednost<select id="fVK"><option value="">Sve</option><option value="ponudeno">Pregovori</option><option value="ugovoreno">Ugovoreno</option><option value="none">Bez vrijednosti</option></select></label>
+      <label class="f sm">Od (€)<input id="fVMin" type="number" min="0" step="1" placeholder="0"></label>
+      <label class="f sm">Do (€)<input id="fVMax" type="number" min="0" step="1" placeholder="∞"></label>
+      <label class="chk inl"><input type="checkbox" id="fNotes" checked> traži i u bilješkama</label>
       <datalist id="industryList"></datalist>
       <label class="f">Poredak<select id="fSort">
         <option value="activity">Zadnja aktivnost</option>

@@ -1,4 +1,4 @@
-# Prodajni stol (CRM za marketinšku agenciju)
+# VIP MARKET (CRM za marketinšku agenciju)
 
 Samostalna PHP + MySQL aplikacija: klijenti, obavezne bilješke, praćenje rada prodavača,
 zajednički sandučić `marketing@vip-grupa.eu` (slanje, primanje, odgovaranje, kopija u Poslano).
@@ -55,3 +55,11 @@ pri prvom zahtjevu nakon ažuriranja. `config.php` se nikad ne dira.
 - **Priloženi dokumenti.** Uz klijenta se čuvaju datoteke do 10 MB (ponude, ugovori). Mogu se priložiti e-mailu (do 15 MB ukupno). Privici dolaznih poruka spremaju se automatski i uz klijenta. Datoteke se spremaju u mapu `storage/` (zaštićena .htaccess-om). Preporuka: u `config.php` postavite `app.storage` na mapu izvan javne mape.
 - **Automatski odgovor izvan radnog vremena.** Radno vrijeme: ponedjeljak–petak 08:00–16:00 (mijenja se u `config.php`, odjeljak `work`). Odgovor se šalje najviše jednom dnevno po pošiljatelju i samo na svježe poruke. Ne odgovara se na automatsku poštu, newslettere, no-reply adrese i mailing liste. Tekst i uključivanje: Postavke > Automatski odgovor. Državni praznici nisu uključeni (tada se odgovara kao u radni dan).
 - **Tjedni izvještaj voditelju.** Svaki ponedjeljak od 08:00 administratori dobivaju e-mail za prošli tjedan (po prodavaču: novi klijenti, aktivnosti, e-mailovi, dobiveni poslovi, klijenti kojima treba pažnja). Pregled i probno slanje: Postavke.
+
+## Struktura koda
+
+- `api.php` – ulazna točka API-ja: pomoćne funkcije, prijava, `bootstrap` i usmjeravanje akcija.
+- `lib/api_tasks.php`, `lib/api_clients.php`, `lib/api_mail.php`, `lib/api_admin.php` – akcije po modulima (zadaci; klijenti, kampanje, uvoz; e-mail, Inbox, grupna pošta, predlošci; statistika, korisnici, sigurnost, backup). Uključuju se iz `api.php` u istom opsegu.
+- `lib/pipeline.php` – lijevak Pregovori → Ugovoreno, podsjetnici (5 dana), upozorenja o isteku ugovora (90/60/30/7 dana), segmenti arhive.
+- `assets/mod-*.js` – izvorni moduli sučelja (ne učitavaju se u pregledniku). Nakon izmjene pokrenite `./build-assets.sh`, koji sastavlja `assets/app.js` (to je datoteka koju poslužuje aplikacija).
+- Migracije baze nalaze se u `lib/core.php` (`$steps`, izvršavaju se po rednom broju).

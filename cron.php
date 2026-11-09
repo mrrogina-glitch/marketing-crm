@@ -14,6 +14,7 @@ require __DIR__ . '/lib/features.php';
 require __DIR__ . '/lib/backup.php';
 require __DIR__ . '/lib/security.php';
 require __DIR__ . '/lib/growth.php';
+require __DIR__ . '/lib/pipeline.php';
 
 app_boot();
 
