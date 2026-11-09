@@ -911,7 +911,7 @@ function mark_client_active(array $c, int $userId, int $t): void
         [$c['id'], $userId, 'status', STAGE_LABELS[$c['status']] . ' → Aktivni' . "\n" . 'Klijent ima aktivnu kampanju.', $t]);
 }
 
-/** Kampanje kojima je prošao datum završetka: u povijest, klijent postaje Izgubljen. */
+/** Kampanje kojima je prošao datum završetka: u povijest. Status klijenta se ne mijenja (Aktivni može biti i bez kampanje). */
 function expire_campaigns(): int
 {
     $n = 0;
@@ -919,7 +919,7 @@ function expire_campaigns(): int
         $t = ms();
         transaction(static function () use ($c, $t): void {
             archive_campaign($c, (int) $c['owner_id']);
-            $lose = $c['status'] === 'aktivni'; // dobiven/izgubljen i ostali ručno postavljeni statusi ostaju
+            $lose = false; // status ostaje kakav jest
             run('UPDATE clients SET camp_active = 0, camp_start = NULL, camp_end = NULL, camp_value = 0, status = ?, updated_at = ? WHERE id = ?', [$lose ? 'izgubljen' : $c['status'], $t, $c['id']]);
             $why = 'Kampanja je završila ' . date('d.m.Y.', strtotime($c['camp_end'])) . ', vrijednost ' . number_format((float) $c['camp_value'], 2, ',', '.') . ' €.';
             audit((int) $c['id'], null, 'campaign', ($lose ? 'Status: Aktivni → Izgubljen. ' : '') . $why, (string) $c['name']);
@@ -928,7 +928,7 @@ function expire_campaigns(): int
         });
         $n++;
         try {
-            campaign_expired_notify($c, $c['status'] === 'aktivni');
+            campaign_expired_notify($c, false);
         } catch (Throwable $e) {
             error_log('CRM camp expire notify: ' . $e->getMessage());
         }
