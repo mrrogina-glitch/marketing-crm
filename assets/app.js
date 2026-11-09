@@ -487,7 +487,7 @@ function initApp() {
       }
     }
     h += '<div class="revmore"><button class="btn sm" data-act="revmore">' + (S.revMore ? 'Prikaži manje (zadnja 4 ' + (kind === 'weekly' ? 'tjedna' : 'mjeseca') + ')' : 'Prikaži više (zadnjih 12 ' + (kind === 'weekly' ? 'tjedana' : 'mjeseci') + ')') + '</button></div>';
-    h += '<p class="muted pad small">Jednokratna kampanja se računa u tjedan/mjesec u kojem počinje; godišnji ugovor se dijeli na 12 mjeseci (u tjednom prikazu na 52 tjedna) od početka. Ako klijent ima više usluga, vrijednost se dijeli jednako među njima.</p>';
+    h += '<p class="muted pad small">Jednokratna kampanja se računa u tjedan/mjesec u kojem počinje; ugovor se u statistiku broji kao mjesečni iznos za svaki mjesec trajanja (u tjednom prikazu proporcionalno po tjednima), a ne kao ukupna vrijednost ugovora. Ako klijent ima više usluga, vrijednost se dijeli jednako među njima.</p>';
     el.innerHTML = h;
   }
 
@@ -662,7 +662,7 @@ function initApp() {
     h += a.map((c) => {
       const t = lastTs(c); const st = isStale(c); const du = isDue(c);
       return '<button class="crow st-' + esc(c.status) + '" data-open="' + esc(c.id) + '">' +
-        '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">' + (c.campType === 'godisnji' ? 'godišnji ugovor do ' : 'kampanja do ') + esc(fmtYmd(c.campEnd)) + '</span>' : '') + (c.hasContract ? ' <span class="chip ' + (c.contractEnd && c.contractEnd < today() ? 'short' : 'camp') + '">ugovor' + (c.contractEnd ? ' do ' + esc(fmtYmd(c.contractEnd)) : '') + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
+        '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">' + (c.campType === 'godisnji' ? 'ugovor do ' : 'kampanja do ') + esc(fmtYmd(c.campEnd)) + '</span>' : '') + (c.hasContract ? ' <span class="chip ' + (c.contractEnd && c.contractEnd < today() ? 'short' : 'camp') + '">ugovor' + (c.contractEnd ? ' do ' + esc(fmtYmd(c.contractEnd)) : '') + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
         '<span class="c-svc">' + esc(c.service) + '</span><span class="c-st">' + pill(c.status) + '</span>' +
         '<span class="c-val">' + (c.value ? eur(c.value) + '<small>' + (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + '</small>' : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +
         '<span class="c-note' + (st ? ' flag-stale' : '') + '" data-l="Zadnji kontakt:">' + esc(t ? rel(t) : 'nema bilješki') + '</span>' +
@@ -1339,12 +1339,12 @@ function initApp() {
       '<label class="f">Vrsta vrijednosti<select id="noteVKind"><option value="ponudeno"' + (c.valueKind !== 'ugovoreno' ? ' selected' : '') + '>Ponuđeno</option><option value="ugovoreno"' + (c.valueKind === 'ugovoreno' ? ' selected' : '') + '>Ugovoreno</option></select></label></div><textarea id="noteText" placeholder="Što je dogovoreno ili napravljeno, i koji je sljedeći korak."></textarea>' +
       '<div class="f wide campbox"><label class="chk"><input type="checkbox" id="cCamp"' + (c.campActive ? ' checked' : '') + '> Aktivni: klijent ima aktivnu kampanju</label>' +
       '<div class="grid2" id="cCampDates"' + (c.campActive ? '' : ' hidden') + '>' + campTypeSel('cCampType', c.campType) + '<label class="f">Kampanja od<input id="cCampStart" type="date" value="' + esc(c.campStart) + '"></label><label class="f">Aktivna do <span class="req">*</span><input id="cCampEnd" type="date" value="' + esc(c.campEnd) + '"></label>' +
-      '<label class="f">Vrijednost (€) – kod godišnjeg ugovora godišnji iznos <span class="req">*</span><input id="cCampValue" type="number" min="0" step="10" inputmode="decimal" value="' + esc(c.campValue || '') + '"></label></div>' +
+      '<label class="f">Vrijednost (€) <span class="req">*</span><input id="cCampValue" type="number" min="0" step="10" inputmode="decimal" value="' + esc(c.campValue || '') + '"></label></div>' +
       (campExpired ? '<div class="renew" id="iRenew"><b>Kampanja je završila ' + esc(fmtYmd(c.campEnd)) + ' Upišite novu kampanju:</b><div class="grid2">' + campTypeSel('rType', c.campType) + '<label class="f">Od<input id="rStart" type="date" value="' + today() + '"></label><label class="f">Do <span class="req">*</span><input id="rEnd" type="date"></label><label class="f">Vrijednost (€) <span class="req">*</span><input id="rValue" type="number" min="0" step="10" inputmode="decimal"></label></div><div class="msg" id="rMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="renew">Spremi novu kampanju</button></div></div>' : '') +
       '<div class="multibox"><label class="chk"><input type="checkbox" id="cMulti"' + (c.multiCamp ? ' checked' : '') + '> Marketing agencija: može imati više aktivnih kampanja odjednom</label>' +
-      (c.multiCamp ? '<div class="campnote">Dodatne aktivne kampanje</div>' + (extraList.length ? '<ul class="camphist">' + extraList.map((x) => '<li>' + (x.title ? esc(x.title) + ' · ' : '') + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + (x.type === 'godisnji' ? ' · godišnji ugovor' : '') + ' · <b>' + esc(eur(x.value)) + '</b> <button class="btn sm" data-act="campdel" data-id="' + esc(x.id) + '">Obriši</button></li>').join('') + '</ul>' : '<div class="campnote">Nema dodatnih aktivnih kampanja.</div>') +
+      (c.multiCamp ? '<div class="campnote">Dodatne aktivne kampanje</div>' + (extraList.length ? '<ul class="camphist">' + extraList.map((x) => '<li>' + (x.title ? esc(x.title) + ' · ' : '') + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + (x.type === 'godisnji' ? ' · ugovor (' + (x.months || 12) + ' mj. × ' + eur(x.value / (x.months || 12)) + ')' : '') + ' · <b>' + esc(eur(x.value)) + '</b> <button class="btn sm" data-act="campdel" data-id="' + esc(x.id) + '">Obriši</button></li>').join('') + '</ul>' : '<div class="campnote">Nema dodatnih aktivnih kampanja.</div>') +
         '<div class="grid2">' + campTypeSel('xType', 'jednokratno') + '<label class="f">Naziv (nije obavezno)<input id="xTitle" type="text" maxlength="190"></label><label class="f">Od<input id="xStart" type="date" value="' + today() + '"></label><label class="f">Do <span class="req">*</span><input id="xEnd" type="date"></label><label class="f">Vrijednost (€) <span class="req">*</span><input id="xValue" type="number" min="0" step="10" inputmode="decimal"></label></div><div class="msg" id="xMsg" role="alert"></div><div class="row-btns start"><button class="btn sm" data-act="campadd">Dodaj kampanju</button></div>' : '') + '</div>' +
-      (campHist.length ? '<div class="campnote">Prošle kampanje</div><ul class="camphist">' + campHist.map((x) => '<li>' + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + (x.type === 'godisnji' ? ' · godišnji ugovor' : '') + ' · <b>' + esc(eur(x.value)) + '</b></li>').join('') + '</ul>' : '') +
+      (campHist.length ? '<div class="campnote">Prošle kampanje</div><ul class="camphist">' + campHist.map((x) => '<li>' + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + (x.type === 'godisnji' ? ' · ugovor (' + (x.months || 12) + ' mj. × ' + eur(x.value / (x.months || 12)) + ')' : '') + ' · <b>' + esc(eur(x.value)) + '</b></li>').join('') + '</ul>' : '') +
       '<span class="campnote">Vrijedi samo uz aktivnu kampanju. Kampanje kraće od 7 dana (i dnevne) označene su ljubičasto. Klijent s aktivnom kampanjom ima status Aktivni, ali status Aktivni može imati i klijent bez kampanje (mijenja se u kartici klijenta). Kad kampanji istekne termin, status se ne mijenja. Za novu kampanju ponovno označite Aktivni i upišite termin i vrijednost u eurima. Promjena se sprema zajedno s bilješkom.</span></div>' +
       '<div class="foot"><span class="msg" id="noteMsg" role="alert"></span><button class="btn primary" data-act="note">Spremi bilješku</button></div></div></div>' +
       '<div class="sec" id="schedSec" hidden><h3>Zakazano slanje</h3><ul class="docs" id="schedList"></ul></div>' +
@@ -1368,6 +1368,7 @@ function initApp() {
       '<div class="msg" id="iMsg" role="alert"></div><div class="row-btns start" style="margin-top:6px"><button class="btn" data-act="saveinfo">Spremi podatke</button></div></details>' +
       (canDelete(c) ? '<div class="danger-z"><button class="btn danger sm" data-act="del1">Obriši klijenta</button><span id="delConfirm" hidden><span class="hint">Briše klijenta i sve njegove bilješke. Ne može se poništiti. </span><button class="btn danger sm" data-act="del2">Da, obriši</button></span></div>' : '') + '</div>';
     $('dSheet').innerHTML = h;
+    annInit('cCampType', c); if ($('rType')) annInit('rType', c); if ($('xType')) annInit('xType', null);
     $('drawer').hidden = false; document.body.classList.add('lock');
     updateDrawer();
     if (!matchMedia('(pointer:coarse)').matches) $('noteText').focus();
@@ -1430,16 +1431,16 @@ function initApp() {
     const fu = $('noteFollow').value, fut = $('noteFollowT').value;
     if (fu && (fu !== c.nextFollowUp || fut !== (c.nextFollowTime || ''))) { body.next_follow_up = fu; body.next_follow_time = fut; }
     const nv = $('noteValue').value, nk = $('noteVKind').value;
-    if (nk !== (c.valueKind || 'ponudeno') && !(Number(nv) > 0)) { $('noteMsg').textContent = 'Za vrstu vrijednosti (' + (nk === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('noteValue').focus(); return; }
+    if (nk !== (c.valueKind || 'ponudeno') && !$('cCamp').checked && !(Number(nv) > 0)) { $('noteMsg').textContent = 'Za vrstu vrijednosti (' + (nk === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('noteValue').focus(); return; }
     if (nv !== '' && (Number(nv) !== Number(c.value || 0) || nk !== (c.valueKind || 'ponudeno'))) { body.value = Number(nv); body.value_kind = nk; }
     const on = $('cCamp').checked, cs = $('cCampStart').value, ce = $('cCampEnd').value, cv = $('cCampValue').value;
-    const ct = $('cCampType').value; const campChanged = on !== !!c.campActive || (on && (ct !== (c.campType || 'jednokratno') || ce !== (c.campEnd || '') || (cs || '') !== (c.campStart || '') || Number(cv || 0) !== Number(c.campValue || 0)));
+    const ct = $('cCampType').value; const campChanged = on !== !!c.campActive || (on && (ct !== (c.campType || 'jednokratno') || ce !== (c.campEnd || '') || (cs || '') !== (c.campStart || '') || annAmount('cCampType').value !== Number(c.campValue || 0) || (ct === 'godisnji' && annAmount('cCampType').months !== (c.campMonths || 12))));
     if (campChanged && on) {
       if (!ce) { $('noteMsg').textContent = 'Odaberite točan datum do kada je kampanja aktivna.'; $('cCampEnd').focus(); return; }
       if (cs && cs > ce) { $('noteMsg').textContent = 'Početak kampanje ne može biti nakon datuma završetka.'; return; }
       if (cv === '' || Number(cv) < 0) { $('noteMsg').textContent = 'Upišite vrijednost kampanje.'; $('cCampValue').focus(); return; }
     }
-    if (campChanged) Object.assign(body, { camp_active: on, camp_start: cs, camp_end: ce, camp_value: Number(cv) || 0, camp_type: ct });
+    if (campChanged) Object.assign(body, { camp_active: on, camp_start: cs, camp_end: ce, camp_value: annAmount('cCampType').value, camp_months: annAmount('cCampType').months, camp_type: ct });
     $('noteMsg').textContent = '';
     const ok = await safe(() => call('note_add', body), 'Bilješka spremljena');
     if (ok) { ta.value = ''; await refresh(true); }
@@ -1483,7 +1484,7 @@ function initApp() {
     if (st && st > en) { m.textContent = 'Početak ne može biti nakon završetka.'; return; }
     if (v === '' || Number(v) < 0) { m.textContent = 'Upišite vrijednost nove kampanje.'; $('rValue').focus(); return; }
     m.textContent = '';
-    const ok = await safe(() => call('campaign_renew', { client_id: c.id, start: st, end: en, value: Number(v), type: $('rType').value }), 'Nova kampanja spremljena');
+    const ok = await safe(() => call('campaign_renew', { client_id: c.id, start: st, end: en, value: annAmount('rType').value, months: annAmount('rType').months, type: $('rType').value }), 'Nova kampanja spremljena');
     if (ok) { await refresh(true); openClient(c.id, true); }
   }
   async function addExtraCamp() {
@@ -1493,7 +1494,7 @@ function initApp() {
     if (st && st > en) { m.textContent = 'Početak ne može biti nakon završetka.'; return; }
     if (v === '' || Number(v) < 0) { m.textContent = 'Upišite vrijednost kampanje.'; $('xValue').focus(); return; }
     m.textContent = '';
-    const ok = await safe(() => call('campaign_add', { client_id: c.id, title: $('xTitle').value.trim(), start: st, end: en, value: Number(v), type: $('xType').value }), 'Kampanja dodana');
+    const ok = await safe(() => call('campaign_add', { client_id: c.id, title: $('xTitle').value.trim(), start: st, end: en, value: annAmount('xType').value, months: annAmount('xType').months, type: $('xType').value }), 'Kampanja dodana');
     if (ok) { await refresh(true); openClient(c.id, true); }
   }
   async function delExtraCamp(id) {
@@ -1558,13 +1559,46 @@ function initApp() {
       (sellers.length ? '<div class="grid2">' + sellers.map((u) => { const r = cur.find((x) => x.userId === u.id); return '<label class="f">' + esc(u.name) + ' (€ tjedno)<input type="number" min="0" step="50" inputmode="decimal" data-goal="' + esc(u.id) + '" value="' + esc(r && r.goal ? r.goal : '') + '"></label>'; }).join('') + '</div>' : '<p class="muted">Nema aktivnih prodavača.</p>') +
       '<div class="row-btns start"><button class="btn primary" data-act="goalsave">Spremi ciljeve</button></div><p class="hint">Svaki prodavač vidi samo svoj cilj i napredak, a administrator vidi svakog prodavača i zbroj.</p></div></section>';
   }
-  const campTypeSel = (id, val) => '<label class="f wide">Vrsta<select id="' + id + '"><option value="jednokratno"' + (val !== 'godisnji' ? ' selected' : '') + '>Jednokratna kampanja</option><option value="godisnji"' + (val === 'godisnji' ? ' selected' : '') + '>Godišnji ugovor (iznos se u statistici dijeli na 12 mjeseci)</option></select></label>';
-  const campTypeTxt = (t) => (t === 'godisnji' ? 'godišnji ugovor' : 'jednokratno');
-  function campTypeChanged(sel, startId, endId, valLabelId) {
-    const g = sel.value === 'godisnji'; const st = $(startId), en = $(endId);
-    if (g && st && en && !en.value) { const d = new Date((st.value || today()) + 'T12:00:00'); d.setFullYear(d.getFullYear() + 1); d.setDate(d.getDate() - 1); en.value = ymd(d); }
-    if (valLabelId && $(valLabelId)) $(valLabelId).dataset.g = g ? '1' : '';
+  const campTypeSel = (id, val) => '<label class="f wide">Vrsta<select id="' + id + '"><option value="jednokratno"' + (val !== 'godisnji' ? ' selected' : '') + '>Jednokratna kampanja</option><option value="godisnji"' + (val === 'godisnji' ? ' selected' : '') + '>Ugovor (mjesečni iznos × broj mjeseci)</option></select></label>';
+  const campTypeTxt = (t) => (t === 'godisnji' ? 'ugovor' : 'jednokratno');
+  /* godišnji ugovor: upisuje se mjesečni iznos i broj mjeseci (1-12); vrijednost ugovora = iznos x mjeseci */
+  const ANN = { nCampType: ['nCampValue', 'nCampStart', 'nCampEnd'], cCampType: ['cCampValue', 'cCampStart', 'cCampEnd'], rType: ['rValue', 'rStart', 'rEnd'], xType: ['xValue', 'xStart', 'xEnd'] };
+  function annSync(typeId, setEnd) {
+    const a = ANN[typeId]; const sel = $(typeId), v = a && $(a[0]); if (!sel || !v) return;
+    const g = sel.value === 'godisnji'; const lab = v.closest('label');
+    let m = $(a[0] + 'M');
+    if (!m) {
+      lab.insertAdjacentHTML('afterend', '<label class="f ann" data-ann="' + a[0] + '" hidden>Broj mjeseci (1–12) <span class="req">*</span><select id="' + a[0] + 'M">' + [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((k) => '<option value="' + k + '"' + (k === 12 ? ' selected' : '') + '>' + k + '</option>').join('') + '</select></label>' +
+        '<label class="f ann" data-ann="' + a[0] + '" hidden>Vrijednost ugovora (€)<input id="' + a[0] + 'T" type="text" readonly tabindex="-1"></label>');
+      m = $(a[0] + 'M');
+    }
+    if (lab.firstChild && lab.firstChild.nodeType === 3) lab.firstChild.nodeValue = g ? 'Mjesečni iznos (€) ' : (lab.dataset.orig || (lab.dataset.orig = lab.firstChild.nodeValue));
+    if (g && lab.dataset.orig === undefined) lab.dataset.orig = 'Vrijednost (€) ';
+    document.querySelectorAll('[data-ann="' + a[0] + '"]').forEach((x) => { x.hidden = !g; });
+    $(a[0] + 'T').value = g ? eur((Number(v.value) || 0) * Number(m.value)) : '';
+    const st = $(a[1]), en = $(a[2]);
+    if (g && setEnd && st && en) { const d = new Date((st.value || today()) + 'T12:00:00'); d.setMonth(d.getMonth() + Number(m.value)); d.setDate(d.getDate() - 1); en.value = ymd(d); }
   }
+  /* iznos za slanje: za godišnji ugovor ukupna vrijednost ugovora i broj mjeseci */
+  function annAmount(typeId) {
+    const a = ANN[typeId]; const g = $(typeId).value === 'godisnji'; const raw = $(a[0]).value;
+    if (!g) return { value: Number(raw) || 0, months: 12 };
+    const mo = Number($(a[0] + 'M').value) || 12;
+    return { value: Math.round((Number(raw) || 0) * mo * 100) / 100, months: mo };
+  }
+  function annInit(typeId, c) {
+    annSync(typeId, false);
+    if (c && c.campType === 'godisnji' && $(typeId) && $(typeId).value === 'godisnji') {
+      const a = ANN[typeId]; const mo = c.campMonths || 12;
+      $(a[0] + 'M').value = String(mo); $(a[0]).value = c.campValue ? String(Math.round(c.campValue / mo * 100) / 100) : ''; annSync(typeId, false);
+    }
+  }
+  function campTypeChanged(sel, startId, endId) { annSync(sel.id, true); }
+  document.addEventListener('input', (e) => { const id = e.target && e.target.id; if (!id) return; Object.keys(ANN).forEach((t) => { if (ANN[t][0] === id) annSync(t, false); }); });
+  document.addEventListener('change', (e) => {
+    const id = e.target && e.target.id; if (!id) return;
+    Object.keys(ANN).forEach((t) => { if (id === ANN[t][0] + 'M' || id === ANN[t][1]) annSync(t, true); });
+  });
   /* pretraga kroz sve: klijenti, bilješke i poruke */
   let gTimer = null, gSeq = 0;
   async function globalSearch(q) {
@@ -1606,7 +1640,7 @@ function initApp() {
   function openNew(prefill) {
     S.lastFocus = document.activeElement;
     ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nEmail2', 'nPhone', 'nValue', 'nFollow', 'nFollowT', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
-    $('nCamp').checked = false; $('nCampDates').hidden = true; $('nCampType').value = 'jednokratno'; $('nVKind').value = ''; $('nValReq').hidden = true; if ($('nDup')) { $('nDup').hidden = true; $('nDup').innerHTML = ''; }
+    $('nCamp').checked = false; $('nCampDates').hidden = true; $('nCampType').value = 'jednokratno'; annSync('nCampType', false); $('nVKind').value = ''; $('nValReq').hidden = true; if ($('nDup')) { $('nDup').hidden = true; $('nDup').innerHTML = ''; }
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
     $('nHint').hidden = !prefill; applyNewKind();
@@ -1628,13 +1662,13 @@ function initApp() {
     if (oib && !/^\d{11}$/.test(oib)) { m.textContent = 'OIB mora imati 11 znamenki.'; $('nOib').focus(); return; }
     if (email && email.indexOf('@') < 1) { m.textContent = 'E-mail adresa nije ispravna.'; $('nEmail').focus(); return; }
     if ($('nEmail2').value.trim() && $('nEmail2').value.indexOf('@') < 1) { m.textContent = 'Dodatna e-mail adresa nije ispravna.'; $('nEmail2').focus(); return; }
-    if ($('nVKind').value && !(Number($('nValue').value) > 0)) { m.textContent = 'Za vrstu vrijednosti (' + ($('nVKind').value === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('nValue').focus(); return; }
+    if ($('nVKind').value && !$('nCamp').checked && !(Number($('nValue').value) > 0)) { m.textContent = 'Za vrstu vrijednosti (' + ($('nVKind').value === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('nValue').focus(); return; }
     if (note.length < 3) { m.textContent = 'Prva bilješka je obavezna.'; $('nNote').focus(); return; }
     if ($('nCamp').checked && !$('nCampEnd').value) { m.textContent = 'Odaberite točan datum do kada je kampanja aktivna.'; $('nCampEnd').focus(); return; }
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
     m.textContent = ''; $('nSave').disabled = true;
     try {
-      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, email2: $('nEmail2').value.trim(), phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, value_kind: $('nVKind').value, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, next_follow_time: $('nFollowT').value, camp_active: $('nCamp').checked, camp_type: $('nCampType').value, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
+      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, email2: $('nEmail2').value.trim(), phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, value_kind: $('nVKind').value, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, next_follow_time: $('nFollowT').value, camp_active: $('nCamp').checked, camp_type: $('nCampType').value, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: annAmount('nCampType').value, camp_months: annAmount('nCampType').months, note });
       toast('Klijent spremljen');
       $('mNew').hidden = true;
       await refresh(true);
