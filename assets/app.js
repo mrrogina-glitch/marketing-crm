@@ -547,7 +547,7 @@ function initApp() {
     const act = S.clients.filter(campActive).sort((a, b) => a.campEnd.localeCompare(b.campEnd));
     const gone = S.clients.filter((c) => c.campActive && c.campEnd && c.campEnd < today()).sort((a, b) => b.campEnd.localeCompare(a.campEnd));
     const shortN = act.filter(campShort).length, soonN = act.filter(campSoon).length;
-    let h = '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Aktivni klijenti</h2><span class="muted">klijenti s aktivnom kampanjom</span></div>' +
+    let h = '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Aktivni klijenti</h2><span class="muted">kampanje i klijenti sa statusom Aktivni</span></div>' +
       '<div class="strip"><div><div class="k">Aktivne kampanje</div><div class="v">' + act.length + '</div><div class="s">trenutno traju</div></div>' +
       '<div><div class="k">Istječu za 7 dana</div><div class="v' + (soonN ? ' warn' : '') + '">' + soonN + '</div><div class="s">uključujući danas</div></div>' +
       '<div><div class="k">Kraće od 7 dana</div><div class="v">' + shortN + '</div><div class="s">dnevne i kratke (ljubičasto)</div></div>' +
@@ -556,6 +556,9 @@ function initApp() {
       (act.length ? '<ul class="list">' + act.map((c) => campLi(c)).join('') + '</ul>' : '<div class="none">Nema aktivnih kampanja. U kartici klijenta označite "Aktivni" i odaberite datum do kada kampanja traje.</div>') + '</section>';
     if (gone.length) h += '<section class="panel-b"><header><h3>Istekle kampanje</h3><span class="muted">završile su; otvorite klijenta i upišite novu kampanju (termin i vrijednost)</span></header><ul class="list">' +
       gone.map((c) => '<li><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + '</b><small>' + esc(fmtYmd(c.campStart) + ' – ' + fmtYmd(c.campEnd) + (c.campValue ? ' · ' + eur(c.campValue) : '')) + '</small></span><span class="b late">upišite novu kampanju</span></button></li>').join('') + '</ul></section>';
+    const nocamp = S.clients.filter((c) => c.status === 'aktivni' && !campActive(c)).sort((a, b) => a.name.localeCompare(b.name, 'hr'));
+    h += '<section class="panel-b"><header><h3>Aktivni klijenti bez aktivne kampanje</h3><span class="muted">' + nocamp.length + '</span></header>' +
+      (nocamp.length ? '<ul class="list">' + nocamp.map((c) => '<li><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + '</b><small>' + esc((c.service ? c.service + ' · ' : '') + person(c.ownerId)) + '</small></span><span class="b">bez kampanje</span></button></li>').join('') + '</ul>' : '<div class="none">Nema aktivnih klijenata bez kampanje.</div>') + '</section>';
     root.innerHTML = h;
   }
 
@@ -1191,7 +1194,7 @@ function initApp() {
       '<label class="f">Vrijednost kampanje (€) <span class="req">*</span><input id="cCampValue" type="number" min="0" step="10" inputmode="decimal" value="' + esc(c.campValue || '') + '"></label></div>' +
       (campExpired ? '<div class="renew" id="iRenew"><b>Kampanja je završila ' + esc(fmtYmd(c.campEnd)) + ' Upišite novu kampanju:</b><div class="grid2"><label class="f">Od<input id="rStart" type="date" value="' + today() + '"></label><label class="f">Do <span class="req">*</span><input id="rEnd" type="date"></label><label class="f">Vrijednost (€) <span class="req">*</span><input id="rValue" type="number" min="0" step="10" inputmode="decimal"></label></div><div class="msg" id="rMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="renew">Spremi novu kampanju</button></div></div>' : '') +
       (campHist.length ? '<div class="campnote">Prošle kampanje</div><ul class="camphist">' + campHist.map((x) => '<li>' + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + ' · <b>' + esc(eur(x.value)) + '</b></li>').join('') + '</ul>' : '') +
-      '<span class="campnote">Vrijedi samo uz aktivnu kampanju. Kampanje kraće od 7 dana (i dnevne) označene su ljubičasto. Klijent s aktivnom kampanjom ima status Aktivni; kad kampanji istekne termin, automatski postaje Izgubljen. Za novu kampanju ponovno označite Aktivni i upišite termin i vrijednost u eurima. Promjena se sprema zajedno s bilješkom.</span></div>' +
+      '<span class="campnote">Vrijedi samo uz aktivnu kampanju. Kampanje kraće od 7 dana (i dnevne) označene su ljubičasto. Klijent s aktivnom kampanjom ima status Aktivni, ali status Aktivni može imati i klijent bez kampanje (mijenja se u kartici klijenta). Kad kampanji istekne termin, status se ne mijenja. Za novu kampanju ponovno označite Aktivni i upišite termin i vrijednost u eurima. Promjena se sprema zajedno s bilješkom.</span></div>' +
       '<div class="foot"><span class="msg" id="noteMsg" role="alert"></span><button class="btn primary" data-act="note">Spremi bilješku</button></div></div></div>' +
       '<div class="sec" id="schedSec" hidden><h3>Zakazano slanje</h3><ul class="docs" id="schedList"></ul></div>' +
       '<div class="sec"><h3>Zadaci <small id="dTkCount"></small></h3><ul class="list tasks" id="dTkList"></ul>' + taskForm('dTk', c.id) + '</div>' +
