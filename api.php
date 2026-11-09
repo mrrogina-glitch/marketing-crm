@@ -144,6 +144,8 @@ function client_out(array $r): array
         'valueKind' => (string) (($r['value_kind'] ?? '') === 'ugovoreno' ? 'ugovoreno' : 'ponudeno'),
         'status' => (string) $r['status'],
         'ownerId' => $r['owner_id'] !== null ? (string) $r['owner_id'] : null,
+        'hasContract' => (int) ($r['has_contract'] ?? 0) === 1,
+        'contractEnd' => ((int) ($r['has_contract'] ?? 0) === 1 && !empty($r['contract_end'])) ? (string) $r['contract_end'] : '',
         'nextFollowUp' => $r['next_follow_up'] ? (string) $r['next_follow_up'] : '',
         'nextFollowTime' => ($r['next_follow_up'] && !empty($r['next_follow_time'])) ? (string) $r['next_follow_time'] : '',
         'campActive' => (int) ($r['camp_active'] ?? 0) === 1,
@@ -693,6 +695,9 @@ try {
             $phone = f_str($in, 'phone', 60, 'Telefon');
             $service = f_services($in['service'] ?? '');
             $industry = array_key_exists('industry', $in) ? f_str($in, 'industry', 120, 'Djelatnost') : (string) ($c['industry'] ?? '');
+            if (!empty($in['has_contract']) && f_date($in['contract_end'] ?? '') === null) {
+                throw new ApiError('Odaberite datum do kada je ugovor aktivan.');
+            }
             $value = array_key_exists('value', $in) ? f_value($in['value']) : (float) $c['value'];
             $owner = active_user_id($in['owner_id'] ?? null, (int) ($c['owner_id'] ?? $u['id']));
             $fu = array_key_exists('next_follow_up', $in) ? f_date($in['next_follow_up']) : ($c['next_follow_up'] ?: null);
@@ -701,7 +706,19 @@ try {
             if ((int) $owner !== (int) $c['owner_id']) {
                 record_owner((int) $c['id'], (int) $owner, ms());
             }
+            if (array_key_exists('has_contract', $in)) {
+                $hc = !empty($in['has_contract']) ? 1 : 0;
+                $ce = $hc ? f_date($in['contract_end'] ?? '') : null;
+                if ($hc && $ce === null) {
+                    throw new ApiError('Odaberite datum do kada je ugovor aktivan.');
+                }
+                run('UPDATE clients SET has_contract = ?, contract_end = ? WHERE id = ?', [$hc, $ce, $c['id']]);
+            }
             $newVals = ['kind' => $kind, 'name' => $name, 'contact' => $contact, 'oib' => $oib, 'email' => $email, 'phone' => $phone, 'service' => $service, 'industry' => $industry, 'value' => $value, 'owner_id' => $owner, 'next_follow_up' => $fu];
+            if (array_key_exists('has_contract', $in)) {
+                $newVals['has_contract'] = !empty($in['has_contract']) ? 1 : 0;
+                $newVals['contract_end'] = !empty($in['has_contract']) ? f_date($in['contract_end'] ?? '') : '';
+            }
             if (array_key_exists('camp_active', $in)) {
                 [$campA, $campS, $campE, $campV] = f_campaign($in);
                 $newVals += ['camp_active' => $campA, 'camp_start' => $campS, 'camp_end' => $campE, 'camp_value' => $campV];
@@ -1103,9 +1120,19 @@ try {
             if ($data === false || $data === '') {
                 throw new ApiError('Datoteka je prazna.');
             }
-            $id = store_document((int) $c['id'], null, (string) $f['name'], (string) ($f['type'] ?? ''), $data, (int) $u['id']);
+            $isContract = !empty($_POST['contract']) ? 1 : 0;
+            if ($isContract) {
+                $ext = strtolower(pathinfo((string) $f['name'], PATHINFO_EXTENSION));
+                $okType = ($ext === 'pdf' && str_starts_with($data, '%PDF'))
+                    || ($ext === 'docx' && str_starts_with($data, "PK\x03\x04"))
+                    || ($ext === 'doc' && str_starts_with($data, "\xD0\xCF\x11\xE0"));
+                if (!$okType) {
+                    throw new ApiError('Ugovor mora biti PDF ili Word datoteka (.pdf, .doc, .docx).');
+                }
+            }
+            $id = store_document((int) $c['id'], null, (string) $f['name'], (string) ($f['type'] ?? ''), $data, (int) $u['id'], $isContract);
             run('UPDATE clients SET updated_at = ? WHERE id = ?', [ms(), $c['id']]);
-            audit((int) $c['id'], (int) $u['id'], 'doc', 'Dodan dokument: ' . (string) $f['name'], (string) $c['name']);
+            audit((int) $c['id'], (int) $u['id'], 'doc', ($isContract ? 'Dodan ugovor: ' : 'Dodan dokument: ') . (string) $f['name'], (string) $c['name']);
             out(['ok' => true, 'id' => (string) $id]);
         }
 
