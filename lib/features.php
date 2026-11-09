@@ -812,8 +812,8 @@ function archive_campaign(array $c, int $userId): void
     if (empty($c['camp_end'])) {
         return;
     }
-    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id, camp_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms(), (string) ($c['service'] ?? ''), $c['owner_id'] ?? null, ($c['camp_type'] ?? '') === 'godisnji' ? 'godisnji' : 'jednokratno']);
+    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id, camp_type, camp_months) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms(), (string) ($c['service'] ?? ''), $c['owner_id'] ?? null, ($c['camp_type'] ?? '') === 'godisnji' ? 'godisnji' : 'jednokratno', camp_months_val($c['camp_months'] ?? 12)]);
 }
 
 /* ---------- dnevnik promjena ---------- */
@@ -929,7 +929,7 @@ function revenue_report(array $u): array
     $items = [];
     $now = date('Y-m-d');
     /* jednokratna kampanja: cijeli iznos u razdoblju početka; godišnji ugovor: iznos / 12 po mjesecu (u tjednom prikazu / 52 po tjednu), 12 mjeseci od početka */
-    $add = static function (?string $d0, float $v, string $svc, $ownerFn, string $type) use (&$items, $now): void {
+    $add = static function (?string $d0, float $v, string $svc, $ownerFn, string $type, int $months = 12) use (&$items, $now): void {
         if (!$d0) {
             return;
         }
@@ -938,31 +938,33 @@ function revenue_report(array $u): array
             return;
         }
         $st = strtotime($d0);
-        for ($k = 0; $k < 12; $k++) {
+        $months = max(1, min(12, $months));
+        for ($k = 0; $k < $months; $k++) {
             $md = $k === 0 ? $d0 : date('Y-m-01', strtotime('+' . $k . ' month', strtotime(date('Y-m-01', $st))));
             if ($md > $now) {
                 break;
             }
-            $items[] = [$md, $v / 12, $svc, $ownerFn($md), 'm'];
+            $items[] = [$md, $v / $months, $svc, $ownerFn($md), 'm'];
         }
         $mon = strtotime('monday this week', $st);
-        for ($k = 0; $k < 52; $k++) {
+        $weeks = (int) round($months * 52 / 12);
+        for ($k = 0; $k < $weeks; $k++) {
             $wd = date('Y-m-d', strtotime('+' . $k . ' week', $mon));
             if ($wd > $now) {
                 break;
             }
-            $items[] = [$wd, $v / 52, $svc, $ownerFn($wd), 'w'];
+            $items[] = [$wd, $v / $weeks, $svc, $ownerFn($wd), 'w'];
         }
     };
-    foreach (rows('SELECT client_id, start_date, end_date, value, service, owner_id, camp_type FROM campaigns') as $r) {
+    foreach (rows('SELECT client_id, start_date, end_date, value, service, owner_id, camp_type, camp_months FROM campaigns') as $r) {
         $cid = (int) $r['client_id'];
         $ow = $r['owner_id'];
-        $add(($r['start_date'] ?: $r['end_date']), (float) $r['value'], (string) $r['service'], static fn ($d) => owner_at($cid, (int) (strtotime($d . ' 23:59:59') * 1000), $ow), (string) ($r['camp_type'] ?? ''));
+        $add(($r['start_date'] ?: $r['end_date']), (float) $r['value'], (string) $r['service'], static fn ($d) => owner_at($cid, (int) (strtotime($d . ' 23:59:59') * 1000), $ow), (string) ($r['camp_type'] ?? ''), camp_months_val($r['camp_months'] ?? 12));
     }
-    foreach (rows('SELECT id, camp_start, camp_end, camp_value, camp_type, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
+    foreach (rows('SELECT id, camp_start, camp_end, camp_value, camp_type, camp_months, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
         $cid = (int) $r['id'];
         $ow = $r['owner_id'];
-        $add(($r['camp_start'] ?: $r['camp_end']), (float) $r['camp_value'], (string) $r['service'], static fn ($d) => owner_at($cid, (int) (strtotime($d . ' 23:59:59') * 1000), $ow), (string) ($r['camp_type'] ?? ''));
+        $add(($r['camp_start'] ?: $r['camp_end']), (float) $r['camp_value'], (string) $r['service'], static fn ($d) => owner_at($cid, (int) (strtotime($d . ' 23:59:59') * 1000), $ow), (string) ($r['camp_type'] ?? ''), camp_months_val($r['camp_months'] ?? 12));
     }
     $w = [];
     $m = [];
@@ -1311,4 +1313,11 @@ function user_stats(array $u, string $from, string $to): array
         $out[] = ['id' => (string) $id, 'calls' => $calls[$id] ?? 0, 'replies' => $rep[$id] ?? 0, 'loginSecs' => $login[$id] ?? 0];
     }
     return $out;
+}
+
+
+/** Broj mjeseci godišnjeg ugovora: cijeli broj od 1 do 12. */
+function camp_months_val($v): int
+{
+    return max(1, min(12, (int) $v ?: 12));
 }
