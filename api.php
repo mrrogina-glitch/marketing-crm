@@ -152,6 +152,7 @@ function client_out(array $r): array
         'campStart' => !empty($r['camp_start']) ? (string) $r['camp_start'] : '',
         'campEnd' => !empty($r['camp_end']) ? (string) $r['camp_end'] : '',
         'campValue' => (float) ($r['camp_value'] ?? 0),
+        'multiCamp' => (int) ($r['multi_camp'] ?? 0) === 1,
         'createdAt' => (int) $r['created_at'],
         'updatedAt' => (int) $r['updated_at'],
         'wonAt' => $r['won_at'] !== null ? (int) $r['won_at'] : null,
@@ -636,7 +637,7 @@ try {
                 'alerts' => $alertsOut,
                 'dnc' => array_map(static fn ($r) => (string) $r['email'], rows('SELECT email FROM do_not_contact')),
                 'ownerHist' => array_map(static fn ($r) => [(string) $r['client_id'], (int) $r['from_at'], (string) $r['owner_id']], rows('SELECT client_id, owner_id, from_at FROM owner_history ORDER BY from_at, id')),
-                'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value']], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
+                'campaigns' => array_map(static fn ($r) => ['id' => (string) $r['id'], 'clientId' => (string) $r['client_id'], 'start' => (string) ($r['start_date'] ?? ''), 'end' => (string) $r['end_date'], 'value' => (float) $r['value'], 'title' => (string) ($r['title'] ?? '')], rows('SELECT * FROM campaigns ORDER BY end_date DESC, id DESC LIMIT 3000')),
                 'docs' => array_map('doc_out', rows('SELECT * FROM documents ORDER BY id DESC LIMIT 3000')),
                 'templates' => $templates,
                 'scheduled' => $scheduled,
@@ -697,6 +698,58 @@ try {
             }
             audit($id, (int) $u['id'], 'create', 'Klijent kreiran, status: ' . (STAGE_LABELS[$status] ?? $status) . ($campA ? ', kampanja do ' . date('d.m.Y.', strtotime($campE)) . ' (' . number_format((float) $campV, 2, ',', '.') . ' €)' : ''), $name);
             out(['ok' => true, 'id' => (string) $id]);
+        }
+
+        case 'client_multi': {
+            $u = need_write();
+            $in = body();
+            $c = load_client((string) ($in['client_id'] ?? ''));
+            if ($u['role'] !== 'admin' && (int) $c['owner_id'] !== (int) $u['id']) {
+                throw new ApiError('Opciju može promijeniti administrator ili prodavač klijenta.', 403);
+            }
+            $on = !empty($in['on']) ? 1 : 0;
+            run('UPDATE clients SET multi_camp = ?, updated_at = ? WHERE id = ?', [$on, ms(), $c['id']]);
+            audit((int) $c['id'], (int) $u['id'], 'update', $on ? 'Označen kao marketing agencija: može imati više aktivnih kampanja odjednom' : 'Maknuta oznaka marketing agencije (više kampanja odjednom)', (string) $c['name']);
+            out(['ok' => true]);
+        }
+
+        case 'campaign_add': {
+            $u = need_write();
+            $in = body();
+            $c = load_client((string) ($in['client_id'] ?? ''));
+            if ($u['role'] !== 'admin' && (int) $c['owner_id'] !== (int) $u['id']) {
+                throw new ApiError('Kampanju može dodati administrator ili prodavač klijenta.', 403);
+            }
+            if ((int) ($c['multi_camp'] ?? 0) !== 1) {
+                throw new ApiError('Više istovremenih kampanja moguće je samo za klijenta označenog kao marketing agencija.');
+            }
+            [, $ns, $ne, $nv] = f_campaign(['camp_active' => 1, 'camp_start' => $in['start'] ?? '', 'camp_end' => $in['end'] ?? '', 'camp_value' => $in['value'] ?? '']);
+            $title = mb_substr(trim((string) ($in['title'] ?? '')), 0, 190);
+            $t = ms();
+            transaction(static function () use ($c, $u, $ns, $ne, $nv, $title, $t): void {
+                run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id, title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$c['id'], $ns, $ne, $nv, $u['id'], $t, (string) ($c['service'] ?? ''), $c['owner_id'] ?? null, $title]);
+                mark_client_active($c, (int) $u['id'], $t);
+                run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)',
+                    [$c['id'], $u['id'], 'note', 'Dodatna kampanja' . ($title !== '' ? ' „' . $title . '“' : '') . ': ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', vrijednost ' . number_format((float) $nv, 2, ',', '.') . ' €', $t]);
+            });
+            audit((int) $c['id'], (int) $u['id'], 'campaign', 'Dodatna kampanja' . ($title !== '' ? ' „' . $title . '“' : '') . ': ' . date('d.m.Y.', strtotime($ns)) . ' – ' . date('d.m.Y.', strtotime($ne)) . ', ' . number_format((float) $nv, 2, ',', '.') . ' €', (string) $c['name']);
+            out(['ok' => true]);
+        }
+
+        case 'campaign_remove': {
+            $u = need_write();
+            $cp = row('SELECT * FROM campaigns WHERE id = ?', [(int) (body()['id'] ?? 0)]);
+            if (!$cp) {
+                throw new ApiError('Kampanja ne postoji.', 404);
+            }
+            $c = load_client((string) $cp['client_id']);
+            if ($u['role'] !== 'admin' && (int) $c['owner_id'] !== (int) $u['id']) {
+                throw new ApiError('Kampanju može obrisati administrator ili prodavač klijenta.', 403);
+            }
+            run('DELETE FROM campaigns WHERE id = ?', [$cp['id']]);
+            audit((int) $c['id'], (int) $u['id'], 'campaign', 'Obrisana kampanja ' . ($cp['title'] !== '' ? '„' . $cp['title'] . '“ ' : '') . date('d.m.Y.', strtotime((string) $cp['end_date'])) . ' (' . number_format((float) $cp['value'], 2, ',', '.') . ' €)', (string) $c['name']);
+            out(['ok' => true]);
         }
 
         case 'campaign_renew': {
