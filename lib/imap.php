@@ -135,6 +135,32 @@ final class ImapClient
         return '"' . str_replace(['\\', '"', "\r", "\n"], ['\\\\', '\\"', '', ''], $s) . '"';
     }
 
+    /** Mapa smeća: oznaka \\Trash (special-use), inače uobičajeni nazivi, inače INBOX.Trash. */
+    public function trashFolder(): string
+    {
+        try {
+            $r = $this->command('LIST "" "*"', false);
+        } catch (Throwable $e) {
+            return 'INBOX.Trash';
+        }
+        $names = [];
+        foreach ($r['untagged'] as $u) {
+            if (preg_match('/^\* LIST \(([^)]*)\) (?:"[^"]*"|NIL) (?:"((?:[^"\\\\]|\\\\.)*)"|(\S+))/i', $u['line'], $m)) {
+                $name = $m[2] !== '' ? stripcslashes($m[2]) : ($m[3] ?? '');
+                if (stripos($m[1], '\\Trash') !== false) {
+                    return $name;
+                }
+                $names[] = $name;
+            }
+        }
+        foreach ($names as $n) {
+            if (preg_match('/^(INBOX[.\/])?(Trash|Deleted( Items| Messages)?|Smeće|Otpad)$/iu', $n)) {
+                return $n;
+            }
+        }
+        return 'INBOX.Trash';
+    }
+
     private function line(): string
     {
         $l = fgets($this->fp, 65536);
@@ -482,6 +508,60 @@ function store_outgoing(string $messageId, string $to, string $subject, string $
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         ['out', $messageId, $inReplyTo, strtolower($fromEmail), $fromName, strtolower($to), $subject, $body, make_preview($body), $attachments, $auto ? 1 : 0, $remindDays, $t, $clientId, $userId, $t, $t, $box === 2 ? 2 : 1]);
     return insert_id();
+}
+
+/**
+ * Poruka obrisana u aplikaciji premješta se u smeće i na poslužitelju (ne briše se zauvijek).
+ * Poruka se traži po Message-ID u mapi iz koje je preuzeta (primljena) ili u mapi Poslano (poslana).
+ * @return string moved | notfound | off | error
+ */
+function server_trash(array $e): string
+{
+    $box = (int) ($e['mailbox'] ?? 1) === 2 ? 2 : 1;
+    $c = imap_cfg($box);
+    if (!$c) {
+        return 'off';
+    }
+    if ($e['direction'] === 'in') {
+        $folder = (string) ($c['folder'] ?? 'INBOX');
+    } else {
+        $folder = $box === 2 ? (string) (imap2_stored()['sent_folder'] ?? 'INBOX.Sent') : (string) ($c['sent_folder'] ?? '');
+    }
+    $mid = trim((string) ($e['message_id'] ?? ''), " <>\t");
+    if ($folder === '' || $mid === '' || !preg_match('/^[A-Za-z0-9._@+%=~$!#&*\/-]{3,190}$/', $mid)) {
+        return 'notfound';
+    }
+    try {
+        $im = new ImapClient($c);
+        try {
+            $im->select($folder);
+            $uids = $im->uidSearch('HEADER Message-ID ' . ImapClient::quote($mid));
+            if (!$uids) {
+                return 'notfound';
+            }
+            $trash = $im->trashFolder();
+            $set = implode(',', $uids);
+            $r = $im->command('UID MOVE ' . $set . ' ' . ImapClient::quote($trash), false);
+            if ($r['status'] !== 'OK') {
+                $r = $im->command('UID COPY ' . $set . ' ' . ImapClient::quote($trash), false);
+                if ($r['status'] !== 'OK' && stripos($r['text'], 'TRYCREATE') !== false) {
+                    $im->command('CREATE ' . ImapClient::quote($trash), false);
+                    $r = $im->command('UID COPY ' . $set . ' ' . ImapClient::quote($trash), false);
+                }
+                if ($r['status'] !== 'OK') {
+                    return 'error';
+                }
+                $im->command('UID STORE ' . $set . ' +FLAGS.SILENT (\\Deleted)', false);
+                $im->command('UID EXPUNGE ' . $set, false); // bez UIDPLUS ostaje označena kao obrisana
+            }
+            return 'moved';
+        } finally {
+            $im->close();
+        }
+    } catch (Throwable $ex) {
+        error_log('CRM server trash: ' . $ex->getMessage());
+        return 'error';
+    }
 }
 
 /** Best effort: keep a copy in the mailbox's Sent folder so webmail shows it too. */
