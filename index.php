@@ -148,7 +148,7 @@ $v = static function (string $f): string {
         <label class="f">Djelatnost<input id="nIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću"></label>
         <div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="nService"></div></div>
         <label class="f">Vrijednost (€) <span class="req" id="nValReq" hidden>*</span><input id="nValue" type="number" min="0" step="50" inputmode="numeric"></label>
-        <label class="f">Status<select id="nVKind"><option value="">— odaberite —</option><option value="ponudeno">Ponuđeno</option><option value="ugovoreno">Ugovoreno</option></select></label>
+        <label class="f">Status<select id="nVKind"><option value="">— odaberite —</option><option value="ponudeno">Pregovori</option><option value="ugovoreno">Ugovoreno</option></select></label>
         <label class="f">Status<select id="nStatus"></select></label>
         <label class="f">Prodavač<select id="nOwner"></select></label>
         <label class="f">Sljedeći kontakt<input id="nFollow" type="date"></label>

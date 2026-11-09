@@ -1009,7 +1009,7 @@ try {
             $vkind = (($in['value_kind'] ?? '') === 'ugovoreno') ? 'ugovoreno' : ((($in['value_kind'] ?? '') === 'ponudeno') ? 'ponudeno' : (string) ($c['value_kind'] ?: 'ponudeno'));
             $valueChanged = $setValue && ((float) $value !== (float) $c['value'] || $vkind !== (string) ($c['value_kind'] ?: 'ponudeno'));
             if ($valueChanged) {
-                $text .= "\nVrijednost: " . number_format((float) $value, 2, ',', '.') . ' € (' . ($vkind === 'ugovoreno' ? 'Ugovoreno' : 'Ponuđeno') . ')';
+                $text .= "\nVrijednost: " . number_format((float) $value, 2, ',', '.') . ' € (' . ($vkind === 'ugovoreno' ? 'Ugovoreno' : 'Pregovori') . ')';
             }
             $camp = null;
             if (array_key_exists('camp_active', $in)) {
@@ -1051,7 +1051,7 @@ try {
             }
             $diff = $new ? client_diff($c, $new) : '';
             if ($valueChanged && $vkind !== (string) ($c['value_kind'] ?: 'ponudeno')) {
-                $diff = trim($diff . ' Status: ' . ($vkind === 'ugovoreno' ? 'Ugovoreno' : 'Ponuđeno'));
+                $diff = trim($diff . ' Status: ' . ($vkind === 'ugovoreno' ? 'Ugovoreno' : 'Pregovori'));
             }
             if ($diff !== '') {
                 audit((int) $c['id'], (int) $u['id'], 'update', $diff, (string) $c['name']);
