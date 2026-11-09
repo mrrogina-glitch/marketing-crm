@@ -261,7 +261,7 @@
   }
   function openMail(tplPrefix) {
     const c = byId(S.openId); if (!c) return;
-    S.mailClient = c.id; S.mailDocs = new Set();
+    S.mailClient = c.id; S.mailDocs = new Set(); S.mailFollowup = false;
     $('mSub').textContent = c.name + (c.kind === 'osoba' ? ' · fizička osoba' : (c.contact ? ' · ' + c.contact : ''));
     const tpls = S.templates.filter((t) => t.kind !== 'akcija');
     fillSelect($('mTpl'), [['', '(prazna poruka)']].concat(tpls.map((t) => [t.id, t.name])), '');
@@ -318,8 +318,8 @@
     }
     $('mMsg').textContent = ''; $('mSend').disabled = true; $('mSend').textContent = later ? 'Zakazujem…' : 'Šaljem…';
     try {
-      const r = await call('email_send', { client_id: c.id, to, subject, body, doc_ids: Array.from(S.mailDocs), remind_days: $('mRemind').value || null, send_at: later ? sendAt : undefined });
-      toast(r.scheduled ? 'E-mail zakazan za ' + fmtDate(r.sendAt) + ' ' + fmtTime(r.sendAt) : 'E-mail poslan'); $('mMail').hidden = true; refresh(true);
+      const r = await call('email_send', { client_id: c.id, to, subject, body, doc_ids: Array.from(S.mailDocs), remind_days: $('mRemind').value || null, send_at: later ? sendAt : undefined, followup: S.mailFollowup ? 1 : undefined });
+      toast(r.needsApproval ? 'E-mail čeka odobrenje administratora' + (r.scheduled ? ' (zakazano za ' + fmtDate(r.sendAt) + ' ' + fmtTime(r.sendAt) + ')' : '') : 'E-mail poslan'); $('mMail').hidden = true; refresh(true);
     } catch (e) { $('mMsg').textContent = e.message; }
     $('mSend').disabled = !S.mail.enabled; $('mSend').textContent = $('mWhen').value === 'later' ? 'Zakaži slanje' : 'Pošalji e-mail';
   }

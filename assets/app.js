@@ -730,7 +730,7 @@ function initApp() {
     if (!a.length) { box.innerHTML = '<div class="cnone">Nema zakazanih poruka.</div>'; return; }
     box.innerHTML = a.map((x) => {
       const c = byId(x.clientId); const mine = isAdmin() || x.userId === S.me.id;
-      const st = x.status === 'failed' ? '<span class="chip bad">nije poslano</span>' : (x.status === 'sending' ? '<span class="chip">šalje se</span>' : '<span class="chip">zakazano</span>');
+      const st = x.status === 'failed' ? '<span class="chip bad">nije poslano</span>' : (x.status === 'awaiting' ? '<span class="chip warn">čeka odobrenje</span>' : x.status === 'sending' ? '<span class="chip">šalje se</span>' : '<span class="chip">zakazano</span>');
       return '<div class="mrow sched"><span class="dot"></span><span class="m-body"><span class="m-from">Za: ' + esc(x.to) + (c ? ' · ' + esc(c.name) : '') + '</span><span class="m-subj">' + esc(x.subject) + '</span>' +
         '<span class="m-prev">' + esc(person(x.userId)) + (x.error ? ' · ' + esc(x.error) : '') + '</span></span>' +
         '<span class="m-meta"><span class="nums">' + fmtDate(x.sendAt) + ' ' + fmtTime(x.sendAt) + '</span>' + st + (mine && x.status !== 'sending' ? '<button class="btn sm" data-act="schedcancel" data-id="' + esc(x.id) + '">Otkaži</button>' : '') + '</span></div>';
@@ -1148,7 +1148,7 @@ function initApp() {
       return;
     }
     if (!(await confirmBox('Poslati kampanju „Povratak"?', 'Poruke se stavljaju u red slanja (do ' + body.limit + ' primatelja) i šalju se uz ograničenje po satu. Slanje se može otkazati u kartici E-mail kampanje.', 'Da, stavi u red'))) return;
-    try { const r = await call('pool_campaign', body); toast('U red slanja stavljeno: ' + r.queued + (r.skipped ? ' (preskočeno ' + r.skipped + ')' : '')); $('pcMsg').textContent = ''; } catch (e) { $('pcMsg').textContent = e.message; }
+    try { const r = await call('pool_campaign', body); toast('Kampanja čeka odobrenje administratora: ' + r.queued + (r.skipped ? ' (preskočeno ' + r.skipped + ')' : '')); $('pcMsg').textContent = ''; } catch (e) { $('pcMsg').textContent = e.message; }
   }
   function poolOpen() {
     toolModal('Arhiva izgubljenih klijenata', '<p class="hint">Izgubljeni klijenti bez prodavača. Otvorite klijenta za uređivanje ili ga preuzmite. Za slanje e-mail kampanje u kartici E-mail kampanje odaberite status Izgubljen.</p>' +
@@ -1394,7 +1394,7 @@ function initApp() {
       const when = body.send_mode === 'manual' ? 'odmah (u serijama)' : body.send_mode === 'fixed' ? 'u ' + fmtDate(body.send_fixed) + ' ' + fmtTime(body.send_fixed) : 'za ' + body.send_days + ' d u ' + body.send_time;
       if (!confirm('Akcija "' + body.name + '" šalje se na ' + pv.count + ' adresa, ' + when + '.\n\nPrimjeri: ' + pv.sample.join(', ') + (pv.count > pv.sample.length ? '…' : '') + '\n\nNastaviti?')) { refresh(true).then(renderSettings); return; }
       const r = await call('campaign_send', { id: row.dataset.tid });
-      toast('Zakazano ' + r.queued + ' poruka' + (r.skipped ? ' (preskočeno ' + r.skipped + ': već poslano zadnjih 30 dana)' : '') + '. Vidi se u Inboxu pod Zakazano slanje.');
+      toast('Akcija čeka odobrenje administratora: ' + r.queued + ' poruka' + (r.skipped ? ' (preskočeno ' + r.skipped + ': već poslano zadnjih 30 dana)' : '') + '. Odobrite je u E-mail kampanje.');
       await refresh(true); renderSettings();
     } catch (e) { m.textContent = e.message; }
   }
@@ -2048,7 +2048,7 @@ function initApp() {
   }
   function openMail(tplPrefix) {
     const c = byId(S.openId); if (!c) return;
-    S.mailClient = c.id; S.mailDocs = new Set();
+    S.mailClient = c.id; S.mailDocs = new Set(); S.mailFollowup = false;
     $('mSub').textContent = c.name + (c.kind === 'osoba' ? ' · fizička osoba' : (c.contact ? ' · ' + c.contact : ''));
     const tpls = S.templates.filter((t) => t.kind !== 'akcija');
     fillSelect($('mTpl'), [['', '(prazna poruka)']].concat(tpls.map((t) => [t.id, t.name])), '');
@@ -2105,8 +2105,8 @@ function initApp() {
     }
     $('mMsg').textContent = ''; $('mSend').disabled = true; $('mSend').textContent = later ? 'Zakazujem…' : 'Šaljem…';
     try {
-      const r = await call('email_send', { client_id: c.id, to, subject, body, doc_ids: Array.from(S.mailDocs), remind_days: $('mRemind').value || null, send_at: later ? sendAt : undefined });
-      toast(r.scheduled ? 'E-mail zakazan za ' + fmtDate(r.sendAt) + ' ' + fmtTime(r.sendAt) : 'E-mail poslan'); $('mMail').hidden = true; refresh(true);
+      const r = await call('email_send', { client_id: c.id, to, subject, body, doc_ids: Array.from(S.mailDocs), remind_days: $('mRemind').value || null, send_at: later ? sendAt : undefined, followup: S.mailFollowup ? 1 : undefined });
+      toast(r.needsApproval ? 'E-mail čeka odobrenje administratora' + (r.scheduled ? ' (zakazano za ' + fmtDate(r.sendAt) + ' ' + fmtTime(r.sendAt) + ')' : '') : 'E-mail poslan'); $('mMail').hidden = true; refresh(true);
     } catch (e) { $('mMsg').textContent = e.message; }
     $('mSend').disabled = !S.mail.enabled; $('mSend').textContent = $('mWhen').value === 'later' ? 'Zakaži slanje' : 'Pošalji e-mail';
   }
@@ -2165,7 +2165,7 @@ function initApp() {
       else if (act === 'schedcancel') safe(() => call('sched_cancel', { id: a.dataset.id }), 'Zakazano slanje otkazano').then((ok) => { if (ok) refresh(true); });
       else if (act === 'remdone') safe(() => call('reminder_done', { email_id: a.dataset.id }), 'Podsjetnik odbačen').then((ok) => { if (ok) refresh(true); });
       else if (act === 'remsnooze') safe(() => call('reminder_done', { email_id: a.dataset.id, snooze_days: 2 }), 'Podsjetnik odgođen za 2 dana').then((ok) => { if (ok) refresh(true); });
-      else if (act === 'remfollow') { S.lastFocus = a; openClient(a.dataset.cid, true); openMail('Follow-up bez'); }
+      else if (act === 'remfollow') { S.lastFocus = a; openClient(a.dataset.cid, true); openMail('Follow-up bez'); S.mailFollowup = true; }
       else if (act === 'sigsave') sigSave();
       else if (act === 'arsave') arSave();
       else if (act === 'reportprev') reportPreview(false);

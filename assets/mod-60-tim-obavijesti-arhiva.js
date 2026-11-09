@@ -283,7 +283,7 @@
       return;
     }
     if (!(await confirmBox('Poslati kampanju „Povratak"?', 'Poruke se stavljaju u red slanja (do ' + body.limit + ' primatelja) i šalju se uz ograničenje po satu. Slanje se može otkazati u kartici E-mail kampanje.', 'Da, stavi u red'))) return;
-    try { const r = await call('pool_campaign', body); toast('U red slanja stavljeno: ' + r.queued + (r.skipped ? ' (preskočeno ' + r.skipped + ')' : '')); $('pcMsg').textContent = ''; } catch (e) { $('pcMsg').textContent = e.message; }
+    try { const r = await call('pool_campaign', body); toast('Kampanja čeka odobrenje administratora: ' + r.queued + (r.skipped ? ' (preskočeno ' + r.skipped + ')' : '')); $('pcMsg').textContent = ''; } catch (e) { $('pcMsg').textContent = e.message; }
   }
   function poolOpen() {
     toolModal('Arhiva izgubljenih klijenata', '<p class="hint">Izgubljeni klijenti bez prodavača. Otvorite klijenta za uređivanje ili ga preuzmite. Za slanje e-mail kampanje u kartici E-mail kampanje odaberite status Izgubljen.</p>' +

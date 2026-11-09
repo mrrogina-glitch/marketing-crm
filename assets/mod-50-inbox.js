@@ -17,7 +17,7 @@
     if (!a.length) { box.innerHTML = '<div class="cnone">Nema zakazanih poruka.</div>'; return; }
     box.innerHTML = a.map((x) => {
       const c = byId(x.clientId); const mine = isAdmin() || x.userId === S.me.id;
-      const st = x.status === 'failed' ? '<span class="chip bad">nije poslano</span>' : (x.status === 'sending' ? '<span class="chip">šalje se</span>' : '<span class="chip">zakazano</span>');
+      const st = x.status === 'failed' ? '<span class="chip bad">nije poslano</span>' : (x.status === 'awaiting' ? '<span class="chip warn">čeka odobrenje</span>' : x.status === 'sending' ? '<span class="chip">šalje se</span>' : '<span class="chip">zakazano</span>');
       return '<div class="mrow sched"><span class="dot"></span><span class="m-body"><span class="m-from">Za: ' + esc(x.to) + (c ? ' · ' + esc(c.name) : '') + '</span><span class="m-subj">' + esc(x.subject) + '</span>' +
         '<span class="m-prev">' + esc(person(x.userId)) + (x.error ? ' · ' + esc(x.error) : '') + '</span></span>' +
         '<span class="m-meta"><span class="nums">' + fmtDate(x.sendAt) + ' ' + fmtTime(x.sendAt) + '</span>' + st + (mine && x.status !== 'sending' ? '<button class="btn sm" data-act="schedcancel" data-id="' + esc(x.id) + '">Otkaži</button>' : '') + '</span></div>';
