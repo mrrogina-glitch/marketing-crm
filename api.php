@@ -205,6 +205,10 @@ function imap2_public(): array
         'secure' => (string) ($c['secure'] ?? 'ssl'),
         'user' => (string) ($c['user'] ?? ''),
         'folder' => (string) ($c['folder'] ?? 'INBOX'),
+        'smtpHost' => (string) ((imap2_stored()['smtp_host'] ?? '') ?: ($c['host'] ?? '')),
+        'smtpPort' => (int) ((imap2_stored()['smtp_port'] ?? 0) ?: 465),
+        'smtpSecure' => (string) ((imap2_stored()['smtp_secure'] ?? '') ?: 'ssl'),
+        'fromName' => (string) (imap2_stored()['from_name'] ?? ''),
         'hasPass' => $c !== null && (string) ($c['pass'] ?? '') !== '',
         'source' => $c === null ? '' : ($stored ? 'settings' : 'config'),
     ];
@@ -238,7 +242,21 @@ function imap2_from_input(array $in): array
     if ($pass === '') {
         throw new ApiError('Upišite lozinku sandučića.');
     }
-    return ['host' => $host, 'port' => $port, 'secure' => $secure, 'user' => $user, 'folder' => $folder, 'pass' => $pass];
+    $smtpHost = strtolower(trim((string) ($in['smtp_host'] ?? ''))) ?: $host;
+    if (!preg_match('/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/', $smtpHost)) {
+        throw new ApiError('Upišite ispravan naziv SMTP poslužitelja.');
+    }
+    $smtpPort = (int) ($in['smtp_port'] ?? 465) ?: 465;
+    if ($smtpPort < 1 || $smtpPort > 65535) {
+        throw new ApiError('SMTP port mora biti između 1 i 65535.');
+    }
+    $smtpSecure = in_array($in['smtp_secure'] ?? '', ['ssl', 'tls', 'none'], true) ? $in['smtp_secure'] : 'ssl';
+    $fromName = trim(str_replace(["\r", "\n"], ' ', (string) ($in['from_name'] ?? '')));
+    if (mb_strlen($fromName) > 80) {
+        throw new ApiError('Naziv pošiljatelja je predug.');
+    }
+    return ['host' => $host, 'port' => $port, 'secure' => $secure, 'user' => $user, 'folder' => $folder, 'pass' => $pass,
+        'smtp_host' => $smtpHost, 'smtp_port' => $smtpPort, 'smtp_secure' => $smtpSecure, 'from_name' => $fromName];
 }
 
 function email_out(array $r): array
@@ -612,6 +630,7 @@ try {
                     'from' => Mailer::fromEmail(),
                     'imap' => $imapOn,
                     'imap2' => $box2,
+                    'from2' => $box2 ? (string) (imap_cfg(2)['user'] ?? '') : '',
                     'imap2Cfg' => $u['role'] === 'admin' ? imap2_public() : null,
                     'lastSync2' => $last2,
                     'error2' => $u['role'] === 'admin' ? $err2 : ($err2 !== '' ? 'error' : ''),
@@ -967,7 +986,7 @@ try {
                 . implode("\n", array_map(static fn ($l) => '> ' . $l, $quoted));
             $cid = $orig['client_id'] !== null ? (int) $orig['client_id'] : null;
             $docIds = is_array($in['doc_ids'] ?? null) ? array_map('intval', $in['doc_ids']) : [];
-            send_and_store($u, $to, mb_substr($subject, 0, 255), $full, $cid, '<' . $orig['message_id'] . '>', $cid ? $docIds : []);
+            send_and_store($u, $to, mb_substr($subject, 0, 255), $full, $cid, '<' . $orig['message_id'] . '>', $cid ? $docIds : [], null, false, [], (int) ($orig['mailbox'] ?? 1) === 2 ? 2 : 1);
             $t = ms();
             transaction(static function () use ($orig, $cid, $u, $to, $subject, $text, $t): void {
                 run('UPDATE emails SET read_at = COALESCE(read_at, ?) WHERE id = ?', [$t, $orig['id']]);
@@ -1047,7 +1066,12 @@ try {
                     $im->close();
                 }
             } catch (Throwable $e) {
-                out(['ok' => false, 'error' => $e->getMessage()]);
+                out(['ok' => false, 'error' => 'Primanje (IMAP): ' . $e->getMessage()]);
+            }
+            try {
+                Mailer::check(array_merge((array) cfg('mail'), ['driver' => 'smtp', 'host' => $c['smtp_host'], 'port' => $c['smtp_port'], 'secure' => $c['smtp_secure'], 'user' => $c['user'], 'pass' => $c['pass'], 'from_email' => $c['user']]));
+            } catch (Throwable $e) {
+                out(['ok' => false, 'error' => 'Slanje (SMTP ' . $c['smtp_host'] . ':' . $c['smtp_port'] . '): ' . $e->getMessage()]);
             }
             out(['ok' => true]);
         }
