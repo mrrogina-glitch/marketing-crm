@@ -188,6 +188,12 @@ function users_out(array $viewer): array
     }, rows('SELECT id, name, email, role, active FROM users ORDER BY name'));
 }
 
+/** Arhiva: izgubljeni klijenti bez prodavača i bez ikakvih povezanih podataka. Ne šalju se u bootstrap (previše ih je). */
+function pool_sql(string $a = 'clients'): string
+{
+    return $a . ".owner_id IS NULL AND " . $a . ".status = 'izgubljen' AND NOT EXISTS (SELECT 1 FROM emails pe WHERE pe.client_id = " . $a . ".id) AND NOT EXISTS (SELECT 1 FROM tasks pt WHERE pt.client_id = " . $a . ".id) AND NOT EXISTS (SELECT 1 FROM documents pd WHERE pd.client_id = " . $a . ".id) AND NOT EXISTS (SELECT 1 FROM campaigns pc WHERE pc.client_id = " . $a . ".id)";
+}
+
 function load_client(string $id): array
 {
     $c = row('SELECT * FROM clients WHERE id = ?', [(int) $id]);
@@ -625,13 +631,15 @@ try {
             if (isset($_GET['rev']) && hash_equals($rev, (string) $_GET['rev'])) {
                 out($base + ['unchanged' => true]);
             }
-            $clients = array_map('client_out', rows('SELECT * FROM clients ORDER BY id'));
-            $notes = array_map('note_out', rows('SELECT id, client_id, author_id, type, subject, body, to_email, created_at, bulk FROM notes ORDER BY created_at DESC, id DESC LIMIT 20000'));
+            $clients = array_map('client_out', rows('SELECT * FROM clients WHERE NOT (' . pool_sql() . ') ORDER BY id'));
+            $poolN = (int) (row('SELECT COUNT(*) AS c FROM clients WHERE ' . pool_sql())['c'] ?? 0);
+            $notes = array_map('note_out', rows('SELECT id, client_id, author_id, type, subject, body, to_email, created_at, bulk FROM notes n WHERE NOT EXISTS (SELECT 1 FROM clients pc2 WHERE pc2.id = n.client_id AND ' . pool_sql('pc2') . ') ORDER BY created_at DESC, id DESC LIMIT 20000'));
             out($base + [
                 'me' => ['id' => (string) $u['id'], 'name' => (string) $u['name'], 'email' => (string) $u['email'], 'role' => (string) $u['role'],
                     'signature' => $sig, 'signatureEffective' => effective_signature($u)],
                 'users' => $usersOut,
                 'clients' => $clients,
+                'pool' => $poolN,
                 'notes' => $notes,
                 'emails' => email_list_out(rows('SELECT id, message_id, direction, from_email, from_name, to_email, subject, preview, attachments, auto, msg_date, client_id, read_at, mailbox FROM emails WHERE deleted_at IS NULL ORDER BY msg_date DESC, id DESC LIMIT 600')),
                 'tasks' => $tasks,
@@ -658,6 +666,29 @@ try {
                     'error' => $u['role'] === 'admin' ? $lastErr : ($lastErr !== '' ? 'error' : ''),
                 ],
             ]);
+        }
+
+        case 'pool_list': {
+            need_user();
+            $q = trim((string) ($_GET['q'] ?? ''));
+            $pg = max(1, (int) ($_GET['p'] ?? 1));
+            $per = 50;
+            $where = pool_sql();
+            $p = [];
+            if ($q !== '') {
+                $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_substr($q, 0, 80)) . '%';
+                $where .= " AND (name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!' OR oib LIKE ? ESCAPE '!' OR phone LIKE ? ESCAPE '!' OR address LIKE ? ESCAPE '!')";
+                $p = [$like, $like, $like, $like, $like];
+            }
+            $total = (int) (row('SELECT COUNT(*) AS c FROM clients WHERE ' . $where, $p)['c'] ?? 0);
+            $list = rows('SELECT * FROM clients WHERE ' . $where . ' ORDER BY name LIMIT ' . $per . ' OFFSET ' . (($pg - 1) * $per), $p);
+            out(['total' => $total, 'page' => $pg, 'per' => $per, 'clients' => array_map('client_out', $list)]);
+        }
+
+        case 'client_get': {
+            need_user();
+            $c = load_client((string) ($_GET['id'] ?? ''));
+            out(['client' => client_out($c), 'notes' => array_map('note_out', rows('SELECT id, client_id, author_id, type, subject, body, to_email, created_at, bulk FROM notes WHERE client_id = ? ORDER BY created_at DESC, id DESC LIMIT 500', [$c['id']]))]);
         }
 
         case 'client_create': {
@@ -863,7 +894,7 @@ try {
                 throw new ApiError('Odaberite datum do kada je ugovor aktivan.');
             }
             $value = array_key_exists('value', $in) ? f_value($in['value']) : (float) $c['value'];
-            $owner = active_user_id($in['owner_id'] ?? null, (int) ($c['owner_id'] ?? $u['id']));
+            $owner = ($c['owner_id'] === null && (string) ($in['owner_id'] ?? '') === '') ? null : active_user_id($in['owner_id'] ?? null, (int) ($c['owner_id'] ?? $u['id']));
             $fu = array_key_exists('next_follow_up', $in) ? f_date($in['next_follow_up']) : ($c['next_follow_up'] ?: null);
             run('UPDATE clients SET kind = ?, oib = ?, name = ?, contact = ?, email = ?, phone = ?, service = ?, industry = ?, value = ?, owner_id = ?, next_follow_up = ?, updated_at = ? WHERE id = ?',
                 [$kind, $oib, $name, $contact, $email, $phone, $service, $industry, $value, $owner, $fu, ms(), $c['id']]);
