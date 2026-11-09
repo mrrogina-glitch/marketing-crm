@@ -9,6 +9,7 @@ require __DIR__ . '/lib/backup.php';
 require __DIR__ . '/lib/security.php';
 require __DIR__ . '/lib/growth.php';
 require __DIR__ . '/lib/pipeline.php';
+require __DIR__ . '/lib/bounce.php';
 require __DIR__ . '/lib/dup.php';
 require __DIR__ . '/lib/mailcamp.php';
 
@@ -582,6 +583,8 @@ try {
         case 'goals_save':
         case 'backup_list':
         case 'backup_run':
+        case 'bounce_preview':
+        case 'bounce_enable':
         case 'backup_latest':
         case 'backup_download':
         case 'alert_done':
