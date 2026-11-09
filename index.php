@@ -143,6 +143,7 @@ $v = static function (string $f): string {
         <label class="f" id="nContactW"><span>Kontakt osoba <span class="req">*</span></span><input id="nContact" autocomplete="off"></label>
         <label class="f">OIB<input id="nOib" inputmode="numeric" maxlength="11" autocomplete="off" placeholder="neobavezno"></label>
         <label class="f">E-mail<input id="nEmail" type="email" autocomplete="off"></label>
+        <label class="f">Dodatni e-mail (u kopiji – CC)<input id="nEmail2" type="email" autocomplete="off" placeholder="nije obavezno"></label>
         <label class="f">Telefon<input id="nPhone" type="tel" autocomplete="off"></label>
         <label class="f">Djelatnost<input id="nIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću"></label>
         <div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="nService"></div></div>
@@ -189,7 +190,7 @@ $v = static function (string $f): string {
     <div class="sh-h"><div><h2 id="mTitle">E-mail klijentu</h2><div class="sub" id="mSub"></div></div><button type="button" class="x" data-act="close" aria-label="Zatvori">×</button></div>
     <div class="sh-b">
       <div class="grid2">
-        <label class="f">Primatelj<input id="mTo" type="email" autocomplete="off"></label>
+        <label class="f">Primatelj<input id="mTo" type="email" autocomplete="off"><small class="hint" id="mCc" hidden></small></label>
         <label class="f">Predložak<select id="mTpl"></select></label>
         <label class="f wide">Predmet<input id="mSubj" autocomplete="off"></label>
         <label class="f wide">Poruka<textarea id="mBody" class="tall"></textarea></label>

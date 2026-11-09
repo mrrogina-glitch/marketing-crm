@@ -138,6 +138,7 @@ function client_out(array $r): array
         'contact' => (string) $r['contact'],
         'email' => (string) $r['email'],
         'phone' => (string) $r['phone'],
+        'email2' => (string) ($r['email2'] ?? ''),
         'address' => (string) ($r['address'] ?? ''),
         'service' => (string) $r['service'],
         'industry' => (string) ($r['industry'] ?? ''),
@@ -699,6 +700,7 @@ try {
             $contact = $kind === 'osoba' ? $name : f_str($in, 'contact', 190, 'Kontakt osoba', true);
             $oib = f_oib($in);
             $email = f_email($in, 'email');
+            $email2 = f_email($in, 'email2');
             $phone = f_str($in, 'phone', 60, 'Telefon');
             $service = f_services($in['service'] ?? '');
             $industry = f_str($in, 'industry', 120, 'Djelatnost');
@@ -724,8 +726,9 @@ try {
                 run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
                 return $cid;
             });
-            run('UPDATE clients SET camp_type = ? WHERE id = ?', [$campT, $id]);
+            run('UPDATE clients SET camp_type = ?, email2 = ? WHERE id = ?', [$campT, $email2, $id]);
             link_emails_to_client($id, strtolower($email));
+            link_emails_to_client($id, strtolower($email2));
             if ($mailId !== null) {
                 run('UPDATE emails SET client_id = ? WHERE id = ? AND client_id IS NULL', [$id, $mailId]);
                 sync_document_clients();
@@ -816,7 +819,7 @@ try {
                 out(['clients' => [], 'notes' => [], 'emails' => []]);
             }
             $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_substr($q, 0, 80)) . '%';
-            $cl = rows("SELECT id, name, contact, email, status FROM clients WHERE name LIKE ? ESCAPE '!' OR contact LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!' OR oib LIKE ? ESCAPE '!' OR phone LIKE ? ESCAPE '!' ORDER BY name LIMIT 8", [$like, $like, $like, $like, $like]);
+            $cl = rows("SELECT id, name, contact, email, status FROM clients WHERE name LIKE ? ESCAPE '!' OR contact LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!' OR email2 LIKE ? ESCAPE '!' OR oib LIKE ? ESCAPE '!' OR phone LIKE ? ESCAPE '!' ORDER BY name LIMIT 8", [$like, $like, $like, $like, $like, $like]);
             $nt = rows("SELECT n.id, n.client_id, n.type, n.body, n.created_at, c.name AS cname FROM notes n JOIN clients c ON c.id = n.client_id WHERE n.body LIKE ? ESCAPE '!' OR n.subject LIKE ? ESCAPE '!' ORDER BY n.created_at DESC LIMIT 8", [$like, $like]);
             $em = rows("SELECT id, direction, from_email, from_name, to_email, subject, body, msg_date FROM emails WHERE deleted_at IS NULL AND (subject LIKE ? ESCAPE '!' OR body LIKE ? ESCAPE '!' OR from_email LIKE ? ESCAPE '!' OR from_name LIKE ? ESCAPE '!' OR to_email LIKE ? ESCAPE '!') ORDER BY msg_date DESC LIMIT 8", [$like, $like, $like, $like, $like]);
             $snip = static function (string $t) use ($q): string {
@@ -924,6 +927,11 @@ try {
                 if ($campA === 1) {
                     mark_client_active($c, (int) $u['id'], ms());
                 }
+            }
+            if (array_key_exists('email2', $in)) {
+                $e2 = f_email($in, 'email2');
+                run('UPDATE clients SET email2 = ? WHERE id = ?', [$e2, $c['id']]);
+                link_emails_to_client((int) $c['id'], strtolower($e2));
             }
             if (array_key_exists('address', $in)) {
                 run('UPDATE clients SET address = ? WHERE id = ?', [mb_substr(trim((string) $in['address']), 0, 255), $c['id']]);
