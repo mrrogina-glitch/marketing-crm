@@ -45,6 +45,30 @@ function imap2_stored(): ?array
     return $d;
 }
 
+/** Identitet za slanje: Inbox 2 odgovara sa svoje adrese (SMTP poslužitelj je po zadanom isti kao IMAP). Null = glavni sandučić. */
+function mail_identity(int $box): ?array
+{
+    if ($box !== 2) {
+        return null;
+    }
+    $c = imap_cfg(2);
+    if ($c === null || !filter_var((string) $c['user'], FILTER_VALIDATE_EMAIL)) {
+        throw new ApiError('Inbox 2 nema ispravnu adresu za slanje. Provjerite postavke Inboxa 2.', 409);
+    }
+    $s = imap2_stored() ?? [];
+    return [
+        'driver' => 'smtp',
+        'host' => (string) (($s['smtp_host'] ?? '') !== '' ? $s['smtp_host'] : $c['host']),
+        'port' => (int) (($s['smtp_port'] ?? 0) ?: 465),
+        'secure' => (string) (($s['smtp_secure'] ?? '') !== '' ? $s['smtp_secure'] : 'ssl'),
+        'user' => (string) $c['user'],
+        'pass' => (string) $c['pass'],
+        'from_email' => (string) $c['user'],
+        'from_name' => (string) ($s['from_name'] ?? ''),
+        'verify_peer' => $c['verify_peer'] ?? true,
+    ];
+}
+
 /** $box 1 = glavni sandučić (config 'imap'), 2 = dodatni sandučić samo za primanje (config 'imap2'). */
 function imap_cfg(int $box = 1): ?array
 {
@@ -451,20 +475,20 @@ function make_preview(string $text): string
 }
 
 /** Records a message sent from the CRM. */
-function store_outgoing(string $messageId, string $to, string $subject, string $body, ?int $clientId, ?int $userId, ?string $inReplyTo, string $fromEmail, string $fromName, ?string $attachments = null, bool $auto = false, ?int $remindDays = null): int
+function store_outgoing(string $messageId, string $to, string $subject, string $body, ?int $clientId, ?int $userId, ?string $inReplyTo, string $fromEmail, string $fromName, ?string $attachments = null, bool $auto = false, ?int $remindDays = null, int $box = 1): int
 {
     $t = ms();
-    run('INSERT INTO emails (direction, message_id, in_reply_to, from_email, from_name, to_email, subject, body, preview, attachments, auto, remind_days, msg_date, client_id, user_id, read_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ['out', $messageId, $inReplyTo, strtolower($fromEmail), $fromName, strtolower($to), $subject, $body, make_preview($body), $attachments, $auto ? 1 : 0, $remindDays, $t, $clientId, $userId, $t, $t]);
+    run('INSERT INTO emails (direction, message_id, in_reply_to, from_email, from_name, to_email, subject, body, preview, attachments, auto, remind_days, msg_date, client_id, user_id, read_at, created_at, mailbox)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['out', $messageId, $inReplyTo, strtolower($fromEmail), $fromName, strtolower($to), $subject, $body, make_preview($body), $attachments, $auto ? 1 : 0, $remindDays, $t, $clientId, $userId, $t, $t, $box === 2 ? 2 : 1]);
     return insert_id();
 }
 
 /** Best effort: keep a copy in the mailbox's Sent folder so webmail shows it too. */
-function sent_copy(string $raw): void
+function sent_copy(string $raw, int $box = 1): void
 {
-    $c = imap_cfg();
-    $folder = (string) ($c['sent_folder'] ?? '');
+    $c = imap_cfg($box);
+    $folder = $box === 2 ? (string) ((imap2_stored()['sent_folder'] ?? 'INBOX.Sent')) : (string) ($c['sent_folder'] ?? '');
     if (!$c || $folder === '') {
         return;
     }

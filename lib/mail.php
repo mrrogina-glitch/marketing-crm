@@ -30,12 +30,12 @@ final class Mailer
      * @param list<array{0:string,1:string,2:string}> $attachments [file name, mime type, binary data]
      * @return array{message_id:string, raw:string} message id without angle brackets, and the full raw message
      */
-    public static function send(string $to, string $subject, string $body, ?string $senderName = null, array $extra = [], array $attachments = []): array
+    public static function send(string $to, string $subject, string $body, ?string $senderName = null, array $extra = [], array $attachments = [], array $identity = []): array
     {
         if (!self::configured()) {
             throw new MailException('E-mail nije podešen u config.php.');
         }
-        $m = cfg('mail');
+        $m = $identity ? array_merge((array) cfg('mail'), $identity) : cfg('mail'); // $identity: drugi sandučić (Inbox 2) šalje sa svoje adrese
         $from = self::clean((string) $m['from_email']);
         $to = self::clean($to);
         if (!filter_var($to, FILTER_VALIDATE_EMAIL) || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
@@ -115,6 +115,12 @@ final class Mailer
             self::smtp($m, $from, $to, $message);
         }
         return ['message_id' => $messageId, 'raw' => $message];
+    }
+
+    /** Provjera SMTP prijave bez slanja poruke. */
+    public static function check(array $m): void
+    {
+        self::smtp($m, (string) ($m['from_email'] ?? ''), '', '');
     }
 
     private static function clean(string $s): string
@@ -209,6 +215,10 @@ final class Mailer
                 $cmd('AUTH LOGIN', [334]);
                 $cmd(base64_encode($user), [334], 'korisničko ime');
                 $cmd(base64_encode((string) ($m['pass'] ?? '')), [235], 'lozinka');
+            }
+            if ($to === '') { // samo provjera prijave
+                @fwrite($fp, "QUIT\r\n");
+                return;
             }
             $cmd('MAIL FROM:<' . $from . '>', [250]);
             $cmd('RCPT TO:<' . $to . '>', [250, 251]);

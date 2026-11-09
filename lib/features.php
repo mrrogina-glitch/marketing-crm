@@ -187,7 +187,7 @@ function load_attachments(array $docIds, ?int $clientId): array
  * The signature is NOT added here; callers add it with with_signature().
  * @return int id of the stored e-mail
  */
-function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false, array $headers = []): int
+function send_and_store(?array $u, string $to, string $subject, string $text, ?int $clientId, ?string $inReplyTo = null, array $docIds = [], ?int $remindDays = null, bool $auto = false, array $headers = [], int $box = 1): int
 {
     if (!Mailer::configured()) {
         throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
@@ -206,7 +206,8 @@ function send_and_store(?array $u, string $to, string $subject, string $text, ?i
         $extra['Precedence'] = 'bulk';
     }
     try {
-        $sent = Mailer::send($to, $subject, $text, $u ? (string) $u['name'] : null, $extra, $attachments);
+        $ident = mail_identity($box);
+        $sent = Mailer::send($to, $subject, $text, $u ? (string) $u['name'] : null, $extra, $attachments, $ident ?? []);
     } catch (MailException $e) {
         error_log('CRM mail: ' . $e->getMessage());
         throw new ApiError('Slanje nije uspjelo. Provjerite adresu primatelja ili obavijestite administratora.', 502);
@@ -216,8 +217,8 @@ function send_and_store(?array $u, string $to, string $subject, string $text, ?i
     }
     $names = $attachments ? mb_substr(implode(' | ', array_map(static fn ($a) => $a[0], $attachments)), 0, 500) : null;
     $id = store_outgoing($sent['message_id'], $to, $subject, $text, $clientId, $u ? (int) $u['id'] : null,
-        $inReplyTo ? trim($inReplyTo, '<> ') : null, Mailer::fromEmail(), $u ? (string) $u['name'] : company_name(), $names, $auto, $remindDays);
-    sent_copy($sent['raw']);
+        $inReplyTo ? trim($inReplyTo, '<> ') : null, $ident ? (string) $ident['from_email'] : Mailer::fromEmail(), $u ? (string) $u['name'] : company_name(), $names, $auto, $remindDays, $box);
+    sent_copy($sent['raw'], $box);
     return $id;
 }
 
