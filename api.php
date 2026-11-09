@@ -444,7 +444,7 @@ try {
             $dc = row('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m FROM documents');
             $tasks = tasks_for($u);
             $templates = array_map('template_out', rows('SELECT * FROM templates ORDER BY sort_order, id'));
-            $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE bulk = 0 AND (status IN ('pending', 'sending') OR (status = 'failed' AND send_at > ?)) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
+            $scheduled = array_map('scheduled_out', rows("SELECT * FROM scheduled_emails WHERE bulk = 0 AND (status IN ('awaiting', 'pending', 'sending') OR (status = 'failed' AND send_at > ?)) ORDER BY send_at LIMIT 300", [ms() - 7 * DAY_MS]));
             $reminders = array_map('reminder_out', reminders_due($u));
             $settings = null;
             if ($u['role'] === 'admin') {
