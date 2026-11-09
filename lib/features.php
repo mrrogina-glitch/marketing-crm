@@ -392,7 +392,7 @@ function process_scheduled(): int
     // grupna pošta: najviše bulk_rate() na sat (30 u 09–15 h, 55 u 16–08 h), nakon pojedinačnih poruka koje imaju prednost
     $quota = min(BULK_BURST, bulk_quota_now());
     if ($quota > 0) {
-        $due = array_merge($due, rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND bulk = 1 AND send_at <= ? ORDER BY send_at, id LIMIT " . (int) $quota, [ms()]));
+        $due = array_merge($due, rows("SELECT * FROM scheduled_emails WHERE status = 'pending' AND bulk = 1 AND send_at <= ? ORDER BY CASE WHEN batch LIKE 'q%' THEN 0 ELSE 1 END, send_at, id LIMIT " . (int) $quota, [ms()]));
     }
     $sent = 0;
     foreach ($due as $s) {
