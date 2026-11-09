@@ -511,7 +511,7 @@ function sync_inbox(int $box = 1): array
             $uids = $im->uidSearch('ALL');
             $uids = array_slice($uids, -((int) ($c['initial_limit'] ?? 150)));
         } else {
-            $uids = array_values(array_filter($im->uidSearch(($lastUid + 1) . ':*'), static fn ($u) => $u > $lastUid));
+            $uids = array_values(array_filter($im->uidSearch('UID ' . ($lastUid + 1) . ':*'), static fn ($u) => $u > $lastUid));
         }
         @ini_set('memory_limit', '512M');
         @set_time_limit(120);
