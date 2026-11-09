@@ -819,3 +819,5 @@ label.f{font-size:14px;color:var(--ink)}
 .toolbar .count{grid-column:1/2;align-self:center;padding-bottom:0}
 #clTools{grid-column:2/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 @media (max-width:760px){#clTools{grid-column:1/-1}}
+html body{font-size:15.5px}
+@media (max-width:760px){html body{font-size:16px}}
