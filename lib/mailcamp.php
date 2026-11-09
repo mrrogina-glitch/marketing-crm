@@ -308,6 +308,10 @@ function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT, ?int 
             $skipped++;
             continue;
         }
+        if (bad_email_open($mail)) {
+            $skipped++; // adresa je vraćena kao neispravna i čeka ispravak
+            continue;
+        }
         if ($u['role'] !== 'admin' && (int) $c['owner_id'] !== (int) $u['id']) {
             $denied++;
             continue;

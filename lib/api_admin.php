@@ -117,6 +117,21 @@ switch ($action) {
         out(['ok' => true, 'name' => $r['name'], 'backups' => backup_list(), 'keep' => BACKUP_KEEP, 'doneToday' => true]);
     }
 
+    case 'bounce_enable': {
+        $u = need_write();
+        need_admin($u);
+        setting_set('bounce_enabled', !empty(body()['on']) ? '1' : '0');
+        audit(null, (int) $u['id'], 'update', 'Automatska obrada vraćenih poruka: ' . (!empty(body()['on']) ? 'uključena' : 'isključena'), '');
+        out(['ok' => true, 'enabled' => bounce_enabled()]);
+    }
+
+    case 'bounce_preview': {
+        // admin: što bi obrada učinila s vraćenim porukama u Inboxu (ništa se ne zapisuje)
+        $u = need_user();
+        need_admin($u);
+        out(bounce_preview());
+    }
+
     case 'backup_latest': {
         // admin: preuzmi najnoviju kopiju (ako danas još nema nijedne, prvo se napravi)
         $u = need_user();

@@ -428,7 +428,7 @@ function process_scheduled(): int
         }
         try {
             $docIds = array_filter(array_map('intval', explode(',', (string) $s['doc_ids'])));
-            send_and_store($u, (string) $s['to_email'], (string) $s['subject'], with_signature((string) $s['body'], $u) . $foot, (int) $c['id'], null, $docIds,
+            send_and_store($u, (string) $s['to_email'], (string) $s['subject'], ((int) ($s['is_final'] ?? 0) === 1 ? (string) $s['body'] : with_signature((string) $s['body'], $u)) . $foot, (int) $c['id'], null, $docIds,
                 $s['remind_days'] !== null ? (int) $s['remind_days'] : null, false, $hdrs);
             // mark as sent first: a failure while writing the note must never cause a second send
             run("UPDATE scheduled_emails SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?", [ms(), $s['id']]);
@@ -1106,6 +1106,7 @@ function run_background_jobs(bool $force = false): array
         $out['backup'] = backup_auto_if_due();
         $out['contact'] = contact_reminders_run();
         $out['negot'] = negotiation_reminders_run();
+        $out['bounce'] = bounce_run();
     } catch (Throwable $e) {
         error_log('CRM jobs: ' . $e->getMessage());
         $out['error'] = $e->getMessage();
@@ -1225,6 +1226,10 @@ function campaign_queue(array $t, array $fallback): array
     $batch = 'a' . $t['id'] . '-' . date('ymdHi');
     $now0 = ms();
     foreach (campaign_recipients($aud) as $c) {
+        if (bad_email_open(trim((string) $c['email']))) {
+            $skipped++;
+            continue;
+        }
         $sender = $c['owner_id'] !== null ? row('SELECT * FROM users WHERE id = ? AND active = 1', [$c['owner_id']]) : null;
         $sender = $sender ?: $fallback;
         $subject = mb_substr(fill_template_text((string) $t['subject'], $c, (string) $sender['name']), 0, 255);

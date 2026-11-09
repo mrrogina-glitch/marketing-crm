@@ -267,6 +267,12 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        30 => [
+            "CREATE TABLE bounce_cases (id $pk, email_id $big NULL, client_id $big NULL, kind VARCHAR(10) NOT NULL, bad_email VARCHAR(190) NOT NULL DEFAULT '', orig_subject VARCHAR(255) NOT NULL DEFAULT '', task_id $big NULL, assignee_id $big NULL, status VARCHAR(12) NOT NULL DEFAULT 'open', created_at $big NOT NULL, deadline_at $big NULL, resolved_at $big NULL, resend_at $big NULL)$opt",
+            "CREATE UNIQUE INDEX ux_bounce_email ON bounce_cases (email_id)",
+            "CREATE INDEX ix_bounce_status ON bounce_cases (status, deadline_at)",
+            "ALTER TABLE scheduled_emails ADD is_final TINYINT NOT NULL DEFAULT 0",
+        ],
         29 => [
             "ALTER TABLE tasks ADD repeat_every VARCHAR(10) NOT NULL DEFAULT ''",
         ],
