@@ -140,13 +140,29 @@ function initApp() {
       S.csrf = d.csrf || S.csrf;
       if (S.offline) { S.offline = false; renderBanner(); }
       if (d.unchanged) return;
-      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.notes = d.notes; S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.approvals = d.approvals || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.alerts = d.alerts || []; S.dnc = d.dnc || []; S.settings = d.settings || null;
+      S.rev = d.rev; S.me = d.me; S.users = d.users; S.clients = d.clients; S.pool = d.pool || 0; S.notes = d.notes; await mergeExtra(); S.emails = d.emails; S.mail = d.mail; S.docs = d.docs || []; S.campaigns = d.campaigns || []; S.tasks = d.tasks || []; S.approvals = d.approvals || []; S.ownerHist = {}; (d.ownerHist || []).forEach((x) => { (S.ownerHist[x[0]] = S.ownerHist[x[0]] || []).push([x[1], x[2]]); }); S.templates = d.templates || []; S.scheduled = d.scheduled || []; S.reminders = d.reminders || []; S.alerts = d.alerts || []; S.dnc = d.dnc || []; S.settings = d.settings || null;
       S.loaded = true;
       derive();
       renderAll(); updateDrawer();
     } catch (e) {
       if (!S.offline) { S.offline = true; renderBanner(); }
     } finally { S.refreshing = false; }
+  }
+  /* klijenti iz arhive koje je korisnik otvorio ostaju učitani dok ne postanu obični klijenti */
+  async function mergeExtra() {
+    if (!S.extra || !S.extra.size) return;
+    const have = new Set(S.clients.map((c) => c.id));
+    for (const id of Array.from(S.extra.keys())) {
+      if (have.has(id)) { S.extra.delete(id); continue; }
+      try { const r = await call('client_get&id=' + encodeURIComponent(id), null, 'GET'); S.extra.set(id, r); S.clients.push(r.client); S.notes = S.notes.concat(r.notes); } catch (e) { S.extra.delete(id); }
+    }
+  }
+  async function ensureClient(id) {
+    if (byId(id)) return true;
+    try {
+      const r = await call('client_get&id=' + encodeURIComponent(id), null, 'GET');
+      (S.extra = S.extra || new Map()).set(String(id), r); S.clients.push(r.client); S.notes = S.notes.concat(r.notes); derive(); return true;
+    } catch (e) { toast(e.message, true); return false; }
   }
   function derive() {
     S.usersById = {}; S.users.forEach((u) => { S.usersById[u.id] = u; });
@@ -641,7 +657,7 @@ function initApp() {
     if (!S.clients.length) { box.innerHTML = emptyHtml(); $('fCount').textContent = ''; return; }
     const a = filteredClients();
     $('fCount').textContent = a.length + ' od ' + S.clients.length;
-    let h = '<div class="chead" aria-hidden="true"><span>Klijent</span><span>Usluga</span><span>Status</span><span style="text-align:right">Vrijednost</span><span>Prodavač</span><span>Zadnji kontakt</span><span>Javiti se</span></div>';
+    let h = (S.pool ? '<div class="poolbar"><span><b>' + S.pool.toLocaleString('hr-HR') + '</b> izgubljenih klijenata bez prodavača nalazi se u arhivi (ne učitavaju se u popis radi brzine).</span><button class="btn sm" data-act="poolopen">Otvori arhivu</button></div>' : '') + '<div class="chead" aria-hidden="true"><span>Klijent</span><span>Usluga</span><span>Status</span><span style="text-align:right">Vrijednost</span><span>Prodavač</span><span>Zadnji kontakt</span><span>Javiti se</span></div>';
     if (!a.length) h += '<div class="cnone">Nijedan klijent ne odgovara filtrima.</div>';
     h += a.map((c) => {
       const t = lastTs(c); const st = isStale(c); const du = isDue(c);
@@ -994,6 +1010,26 @@ function initApp() {
       toolModal('Uvoz završen', '<p>Uvezeno klijenata: <b>' + r.created + '</b>. Preskočeno duplikata: ' + r.skippedDup + '. Redaka s greškom: ' + r.skippedBad + '.</p><div class="acts"><button class="btn primary" data-tool="close">Zatvori</button></div>');
     } catch (e) { $('impMsg').textContent = e.message; }
   }
+  /* ---------- arhiva izgubljenih klijenata (bez prodavača) ---------- */
+  async function poolLoad(p) {
+    const q = ($('poolQ') ? $('poolQ').value : (S.poolQ || '')).trim(); S.poolQ = q;
+    const box = $('poolRes'); if (!box) return;
+    box.innerHTML = '<p class="muted">Učitavanje…</p>';
+    try {
+      const d = await call('pool_list&q=' + encodeURIComponent(q) + '&p=' + (p || 1), null, 'GET');
+      const pages = Math.max(1, Math.ceil(d.total / d.per));
+      box.innerHTML = '<p class="muted small">' + d.total.toLocaleString('hr-HR') + ' klijenata' + (q ? ' za "' + esc(q) + '"' : '') + ' · stranica ' + d.page + ' od ' + pages + '</p>' +
+        (d.clients.length ? '<div class="tscroll" style="max-height:52vh"><table class="tbl"><thead><tr><th>Tvrtka</th><th>OIB</th><th>E-mail</th><th>Telefon</th><th>Adresa</th></tr></thead><tbody>' +
+          d.clients.map((c) => '<tr><td><button class="lnk" data-tool="poolopen" data-id="' + esc(c.id) + '">' + esc(c.name) + '</button></td><td>' + esc(c.oib) + '</td><td>' + esc(c.email) + '</td><td>' + esc(c.phone) + '</td><td>' + esc(c.address) + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted">Nema rezultata.</p>') +
+        '<div class="acts"><button class="btn sm" data-tool="poolpage" data-p="' + (d.page - 1) + '"' + (d.page <= 1 ? ' disabled' : '') + '>← Prethodna</button><button class="btn sm" data-tool="poolpage" data-p="' + (d.page + 1) + '"' + (d.page >= pages ? ' disabled' : '') + '>Sljedeća →</button></div>';
+    } catch (e) { box.innerHTML = '<p class="msg">' + esc(e.message) + '</p>'; }
+  }
+  function poolOpen() {
+    toolModal('Arhiva izgubljenih klijenata', '<p class="hint">Izgubljeni klijenti bez prodavača. Otvorite klijenta za uređivanje ili ga preuzmite. Za slanje e-mail kampanje u kartici E-mail kampanje odaberite status Izgubljen.</p>' +
+      '<label class="f">Pretraga<input id="poolQ" type="search" placeholder="Tvrtka, OIB, e-mail, telefon, adresa" value="' + esc(S.poolQ || '') + '"></label><div id="poolRes"></div>');
+    let tm = null; $('poolQ').addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => poolLoad(1), 350); });
+    poolLoad(1);
+  }
   function toolClick(ev) {
     const b = ev.target.closest('[data-tool]');
     if (b) {
@@ -1004,6 +1040,8 @@ function initApp() {
       else if (t === 'impcheck') impCheck();
       else if (t === 'impgo') impGo();
       else if (t === 'impopen') impOpen();
+      else if (t === 'poolpage') poolLoad(+b.dataset.p);
+      else if (t === 'poolopen') { const id = b.dataset.id; toolClose(); ensureClient(id).then((ok) => { if (ok) { renderAll(); openClient(id); } }); }
       return;
     }
     if (ev.target.classList && ev.target.classList.contains('overlay')) toolClose();
@@ -1264,7 +1302,7 @@ function initApp() {
     const campExpired = !!c.campActive && !!c.campEnd && c.campEnd < today();
     const extraList = extraCamps(c); const extraIds = new Set(extraList.map((x) => x.id));
     const campHist = (S.campaigns || []).filter((x) => x.clientId === c.id && !extraIds.has(x.id));
-    const ownerOpts = ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === c.ownerId ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+    const ownerOpts = (c.ownerId ? '' : '<option value="" selected>— bez prodavača —</option>') + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === c.ownerId ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
     let h = '<div class="sh-h"><div><h2 id="dTitle"></h2><div class="sub"><span id="dPill"></span><span id="dSub"></span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">' +
       dncBanner(c) +
       '<div class="sec"><div class="acts"><label class="f">Status<select id="stSel">' + STAGES.map((s) => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('') + '</select></label><button class="btn" data-act="mail">Napiši e-mail</button>' + (String(c.ownerId) !== String(S.me.id) ? '<button class="btn" data-act="take">Preuzmi klijenta</button>' : '') + '</div>' +
@@ -1911,7 +1949,7 @@ function initApp() {
     const tab = t.closest('[data-tab]'); if (tab) { setTab(tab.dataset.tab); return; }
     const per = t.closest('[data-period]'); if (per) { S.period = per.dataset.period; S.tmFrom = ''; S.tmTo = ''; renderTeam(); return; }
     const mailBtn = t.closest('[data-mail]'); if (mailBtn) { openMailItem(mailBtn.dataset.mail); return; }
-    const op = t.closest('[data-open]'); if (op) { openClient(op.dataset.open, !!op.dataset.keep); return; }
+    const op = t.closest('[data-open]'); if (op) { const oid = op.dataset.open; const kp = !!op.dataset.keep; if (byId(oid)) openClient(oid, kp); else ensureClient(oid).then((ok) => { if (ok) { renderAll(); openClient(oid, kp); } }); return; }
     const a = t.closest('[data-act]');
     if (a && !a.disabled) {
       const act = a.dataset.act;
@@ -1983,6 +2021,7 @@ function initApp() {
       else if (act === 'dnccl') dncClient(a.dataset.id);
       else if (act === 'dupopen') dupOpen();
       else if (act === 'impopen') impOpen();
+      else if (act === 'poolopen') poolOpen();
       return;
     }
     if (t.classList && t.classList.contains('overlay')) closeTop();
