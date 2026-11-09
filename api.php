@@ -570,9 +570,10 @@ try {
                 throw new ApiError('Poruku može obrisati administrator, pošiljatelj ili prodavač klijenta.', 403);
             }
             delete_document_rows(rows('SELECT id, stored FROM documents WHERE email_id = ?', [$e['id']]));
+            $srv = server_trash($e); // i na poslužitelju: premještanje u smeće
             run("UPDATE emails SET deleted_at = ?, client_id = NULL, remind_done_at = COALESCE(remind_done_at, ?), subject = '', body = '', preview = '', attachments = NULL, from_name = '', reply_to = '', in_reply_to = NULL WHERE id = ?", [ms(), ms(), $e['id']]);
-            audit($e['client_id'] !== null ? (int) $e['client_id'] : null, (int) $u['id'], 'email', 'Obrisana poruka: ' . ((string) $e['subject'] !== '' ? $e['subject'] : '(bez predmeta)') . ' (' . ($e['direction'] === 'in' ? 'od ' . $e['from_email'] : 'za ' . $e['to_email']) . ')');
-            out(['ok' => true]);
+            audit($e['client_id'] !== null ? (int) $e['client_id'] : null, (int) $u['id'], 'email', 'Obrisana poruka: ' . ((string) $e['subject'] !== '' ? $e['subject'] : '(bez predmeta)') . ' (' . ($e['direction'] === 'in' ? 'od ' . $e['from_email'] : 'za ' . $e['to_email']) . ')' . ($srv === 'moved' ? ' · premještena u smeće na poslužitelju' : ''));
+            out(['ok' => true, 'server' => $srv]);
         }
 
         case 'logout': {
@@ -1119,6 +1120,7 @@ try {
                         $last[] = ['uid' => $uid, 'date' => (string) ($h['date'] ?? ''), 'from' => mb_substr((string) ($h['from'] ?? ''), 0, 80), 'to' => mb_substr((string) ($h['to'] ?? ''), 0, 80), 'subject' => mb_substr(Mime::decodeHeader((string) ($h['subject'] ?? '')), 0, 80), 'inDb' => $ex ? ('mailbox ' . $ex['mailbox'] . ' ' . $ex['direction']) : 'ne'];
                     }
                     $res['last'] = $last;
+                    $res['trashFolder'] = $im->trashFolder();
                     $rg = $im->uidSearch(($res['storedLastUid'] + 1) . ':*');
                     $res['rangeSearch'] = ['count' => count($rg), 'first' => array_slice($rg, 0, 3), 'last' => array_slice($rg, -3)];
                     $res['lock'] = (string) (meta_get('sync_lock') ?? '');
