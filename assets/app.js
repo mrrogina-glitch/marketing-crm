@@ -173,6 +173,7 @@ function initApp() {
   /* kampanje: aktivna je samo dok je označena i datum završetka nije prošao; kraća od 7 dana (npr. dnevna) ima drugu boju */
   const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
   const campActive = (c) => !!c.campActive && !!c.campEnd && c.campEnd >= today();
+  const extraCamps = (c) => (c.multiCamp ? (S.campaigns || []).filter((x) => x.clientId === c.id && x.end >= today()).sort((a, b) => a.end.localeCompare(b.end)) : []);
   const campLeft = (c) => dayDiff(today(), c.campEnd);
   const campLen = (c) => (c.campStart ? dayDiff(c.campStart, c.campEnd) + 1 : 0);
   const campShort = (c) => campLen(c) > 0 && campLen(c) < 7;
@@ -589,7 +590,7 @@ function initApp() {
       (act.length ? '<ul class="list">' + act.map((c) => campLi(c)).join('') + '</ul>' : '<div class="none">Nema aktivnih kampanja. U kartici klijenta označite "Aktivni" i odaberite datum do kada kampanja traje.</div>') + '</section>';
     if (gone.length) h += '<section class="panel-b"><header><h3>Istekle kampanje</h3><span class="muted">završile su; otvorite klijenta i upišite novu kampanju (termin i vrijednost)</span></header><ul class="list">' +
       gone.map((c) => '<li><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + '</b><small>' + esc(fmtYmd(c.campStart) + ' – ' + fmtYmd(c.campEnd) + (c.campValue ? ' · ' + eur(c.campValue) : '')) + '</small></span><span class="b late">upišite novu kampanju</span></button></li>').join('') + '</ul></section>';
-    const nocamp = S.clients.filter((c) => c.status === 'aktivni' && !campActive(c)).sort((a, b) => a.name.localeCompare(b.name, 'hr'));
+    const nocamp = S.clients.filter((c) => c.status === 'aktivni' && !campActive(c) && !extraCamps(c).length).sort((a, b) => a.name.localeCompare(b.name, 'hr'));
     h += '<section class="panel-b"><header><h3>Aktivni klijenti bez aktivne kampanje</h3><span class="muted">' + nocamp.length + '</span></header>' +
       (nocamp.length ? '<ul class="list">' + nocamp.map((c) => '<li><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + '</b><small>' + esc((c.service ? c.service + ' · ' : '') + person(c.ownerId)) + '</small></span><span class="b">bez kampanje</span></button></li>').join('') + '</ul>' : '<div class="none">Nema aktivnih klijenata bez kampanje.</div>') + '</section>';
     root.innerHTML = h;
@@ -1239,7 +1240,8 @@ function initApp() {
     if (keep) { $('mdrawer').hidden = true; }
     S.openId = id; S.pendingStatus = null;
     const campExpired = !!c.campActive && !!c.campEnd && c.campEnd < today();
-    const campHist = (S.campaigns || []).filter((x) => x.clientId === c.id);
+    const extraList = extraCamps(c); const extraIds = new Set(extraList.map((x) => x.id));
+    const campHist = (S.campaigns || []).filter((x) => x.clientId === c.id && !extraIds.has(x.id));
     const ownerOpts = ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === c.ownerId ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
     let h = '<div class="sh-h"><div><h2 id="dTitle"></h2><div class="sub"><span id="dPill"></span><span id="dSub"></span></div></div><button class="x" data-act="close" aria-label="Zatvori">×</button></div><div class="sh-b">' +
       dncBanner(c) +
@@ -1254,6 +1256,9 @@ function initApp() {
       '<div class="grid2" id="cCampDates"' + (c.campActive ? '' : ' hidden') + '><label class="f">Kampanja od<input id="cCampStart" type="date" value="' + esc(c.campStart) + '"></label><label class="f">Aktivna do <span class="req">*</span><input id="cCampEnd" type="date" value="' + esc(c.campEnd) + '"></label>' +
       '<label class="f">Vrijednost kampanje (€) <span class="req">*</span><input id="cCampValue" type="number" min="0" step="10" inputmode="decimal" value="' + esc(c.campValue || '') + '"></label></div>' +
       (campExpired ? '<div class="renew" id="iRenew"><b>Kampanja je završila ' + esc(fmtYmd(c.campEnd)) + ' Upišite novu kampanju:</b><div class="grid2"><label class="f">Od<input id="rStart" type="date" value="' + today() + '"></label><label class="f">Do <span class="req">*</span><input id="rEnd" type="date"></label><label class="f">Vrijednost (€) <span class="req">*</span><input id="rValue" type="number" min="0" step="10" inputmode="decimal"></label></div><div class="msg" id="rMsg" role="alert"></div><div class="row-btns start"><button class="btn primary sm" data-act="renew">Spremi novu kampanju</button></div></div>' : '') +
+      '<div class="multibox"><label class="chk"><input type="checkbox" id="cMulti"' + (c.multiCamp ? ' checked' : '') + '> Marketing agencija: može imati više aktivnih kampanja odjednom</label>' +
+      (c.multiCamp ? '<div class="campnote">Dodatne aktivne kampanje</div>' + (extraList.length ? '<ul class="camphist">' + extraList.map((x) => '<li>' + (x.title ? esc(x.title) + ' · ' : '') + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + ' · <b>' + esc(eur(x.value)) + '</b> <button class="btn sm" data-act="campdel" data-id="' + esc(x.id) + '">Obriši</button></li>').join('') + '</ul>' : '<div class="campnote">Nema dodatnih aktivnih kampanja.</div>') +
+        '<div class="grid2"><label class="f">Naziv (nije obavezno)<input id="xTitle" type="text" maxlength="190"></label><label class="f">Od<input id="xStart" type="date" value="' + today() + '"></label><label class="f">Do <span class="req">*</span><input id="xEnd" type="date"></label><label class="f">Vrijednost (€) <span class="req">*</span><input id="xValue" type="number" min="0" step="10" inputmode="decimal"></label></div><div class="msg" id="xMsg" role="alert"></div><div class="row-btns start"><button class="btn sm" data-act="campadd">Dodaj kampanju</button></div>' : '') + '</div>' +
       (campHist.length ? '<div class="campnote">Prošle kampanje</div><ul class="camphist">' + campHist.map((x) => '<li>' + esc(fmtYmd(x.start) + ' – ' + fmtYmd(x.end)) + ' · <b>' + esc(eur(x.value)) + '</b></li>').join('') + '</ul>' : '') +
       '<span class="campnote">Vrijedi samo uz aktivnu kampanju. Kampanje kraće od 7 dana (i dnevne) označene su ljubičasto. Klijent s aktivnom kampanjom ima status Aktivni, ali status Aktivni može imati i klijent bez kampanje (mijenja se u kartici klijenta). Kad kampanji istekne termin, status se ne mijenja. Za novu kampanju ponovno označite Aktivni i upišite termin i vrijednost u eurima. Promjena se sprema zajedno s bilješkom.</span></div>' +
       '<div class="foot"><span class="msg" id="noteMsg" role="alert"></span><button class="btn primary" data-act="note">Spremi bilješku</button></div></div></div>' +
@@ -1394,6 +1399,26 @@ function initApp() {
     m.textContent = '';
     const ok = await safe(() => call('campaign_renew', { client_id: c.id, start: st, end: en, value: Number(v) }), 'Nova kampanja spremljena');
     if (ok) { await refresh(true); openClient(c.id, true); }
+  }
+  async function addExtraCamp() {
+    const c = byId(S.openId); if (!c) return;
+    const m = $('xMsg'), st = $('xStart').value, en = $('xEnd').value, v = $('xValue').value;
+    if (!en) { m.textContent = 'Odaberite točan datum završetka kampanje.'; $('xEnd').focus(); return; }
+    if (st && st > en) { m.textContent = 'Početak ne može biti nakon završetka.'; return; }
+    if (v === '' || Number(v) < 0) { m.textContent = 'Upišite vrijednost kampanje.'; $('xValue').focus(); return; }
+    m.textContent = '';
+    const ok = await safe(() => call('campaign_add', { client_id: c.id, title: $('xTitle').value.trim(), start: st, end: en, value: Number(v) }), 'Kampanja dodana');
+    if (ok) { await refresh(true); openClient(c.id, true); }
+  }
+  async function delExtraCamp(id) {
+    const c = byId(S.openId); if (!c) return;
+    const ok = await safe(() => call('campaign_remove', { id }), 'Kampanja obrisana');
+    if (ok) { await refresh(true); openClient(c.id, true); }
+  }
+  async function setMulti(on) {
+    const c = byId(S.openId); if (!c) return;
+    const ok = await safe(() => call('client_multi', { client_id: c.id, on }), on ? 'Označeno kao marketing agencija' : 'Oznaka maknuta');
+    await refresh(true); openClient(c.id, true);
   }
   async function deleteClient() {
     const c = byId(S.openId); if (!c) return;
@@ -1791,6 +1816,8 @@ function initApp() {
       else if (act === 'stno') cancelStatus();
       else if (act === 'saveinfo') saveInfo();
       else if (act === 'renew') renewCampaign();
+      else if (act === 'campadd') addExtraCamp();
+      else if (act === 'campdel') delExtraCamp(a.dataset.id);
       else if (act === 'taskadd') taskAdd(a);
       else if (act === 'maildel') deleteMail(a.dataset.id);
       else if (act === 'taskdone' || act === 'taskdel') taskAct(a);
@@ -1862,6 +1889,7 @@ function initApp() {
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
     else if (ev.target.name === 'nKindR') applyNewKind();
     else if (ev.target.dataset && ev.target.dataset.f === 'send_mode') { const r = ev.target.closest('.tplrow'); r.querySelectorAll('[data-sch]').forEach((x) => { x.hidden = x.dataset.sch !== ev.target.value; }); }
+    else if (id === 'cMulti') setMulti(ev.target.checked);
     else if (id === 'cCamp' || id === 'iCamp' || id === 'nCamp') { const p = id[0]; $(p + 'CampDates').hidden = !ev.target.checked; if (ev.target.checked && !$(p + 'CampStart').value) $(p + 'CampStart').value = today(); }
     else if (id === 'mWhen') { const l = ev.target.value === 'later'; $('mAtW').hidden = !l; $('mSend').textContent = l ? 'Zakaži slanje' : 'Pošalji e-mail'; }
     else if (id === 'docFile') onDocFile(ev.target, false);
