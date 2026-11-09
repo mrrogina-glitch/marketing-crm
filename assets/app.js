@@ -1430,6 +1430,7 @@ function initApp() {
     const fu = $('noteFollow').value, fut = $('noteFollowT').value;
     if (fu && (fu !== c.nextFollowUp || fut !== (c.nextFollowTime || ''))) { body.next_follow_up = fu; body.next_follow_time = fut; }
     const nv = $('noteValue').value, nk = $('noteVKind').value;
+    if (nk !== (c.valueKind || 'ponudeno') && !(Number(nv) > 0)) { $('noteMsg').textContent = 'Za vrstu vrijednosti (' + (nk === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('noteValue').focus(); return; }
     if (nv !== '' && (Number(nv) !== Number(c.value || 0) || nk !== (c.valueKind || 'ponudeno'))) { body.value = Number(nv); body.value_kind = nk; }
     const on = $('cCamp').checked, cs = $('cCampStart').value, ce = $('cCampEnd').value, cv = $('cCampValue').value;
     const ct = $('cCampType').value; const campChanged = on !== !!c.campActive || (on && (ct !== (c.campType || 'jednokratno') || ce !== (c.campEnd || '') || (cs || '') !== (c.campStart || '') || Number(cv || 0) !== Number(c.campValue || 0)));
@@ -1605,7 +1606,7 @@ function initApp() {
   function openNew(prefill) {
     S.lastFocus = document.activeElement;
     ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nEmail2', 'nPhone', 'nValue', 'nFollow', 'nFollowT', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
-    $('nCamp').checked = false; $('nCampDates').hidden = true; $('nCampType').value = 'jednokratno'; $('nVKind').value = 'ponudeno'; if ($('nDup')) { $('nDup').hidden = true; $('nDup').innerHTML = ''; }
+    $('nCamp').checked = false; $('nCampDates').hidden = true; $('nCampType').value = 'jednokratno'; $('nVKind').value = ''; $('nValReq').hidden = true; if ($('nDup')) { $('nDup').hidden = true; $('nDup').innerHTML = ''; }
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
     $('nHint').hidden = !prefill; applyNewKind();
@@ -1627,6 +1628,7 @@ function initApp() {
     if (oib && !/^\d{11}$/.test(oib)) { m.textContent = 'OIB mora imati 11 znamenki.'; $('nOib').focus(); return; }
     if (email && email.indexOf('@') < 1) { m.textContent = 'E-mail adresa nije ispravna.'; $('nEmail').focus(); return; }
     if ($('nEmail2').value.trim() && $('nEmail2').value.indexOf('@') < 1) { m.textContent = 'Dodatna e-mail adresa nije ispravna.'; $('nEmail2').focus(); return; }
+    if ($('nVKind').value && !(Number($('nValue').value) > 0)) { m.textContent = 'Za vrstu vrijednosti (' + ($('nVKind').value === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + ') upišite Vrijednost (€).'; $('nValue').focus(); return; }
     if (note.length < 3) { m.textContent = 'Prva bilješka je obavezna.'; $('nNote').focus(); return; }
     if ($('nCamp').checked && !$('nCampEnd').value) { m.textContent = 'Odaberite točan datum do kada je kampanja aktivna.'; $('nCampEnd').focus(); return; }
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
@@ -2110,3 +2112,6 @@ function initApp() {
   setTimeout(presencePing, 3000);
 }
 })();
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'nVKind') { const r = document.getElementById('nValReq'); if (r) r.hidden = !e.target.value; }
+});
