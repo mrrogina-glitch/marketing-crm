@@ -716,7 +716,7 @@ function initApp() {
       const rb = e.dir === 'in' && e.repliedBy ? person(e.repliedBy) : '';
       return '<button class="mrow' + (unread ? ' unread' : '') + (rb ? ' replied' : '') + '" data-mail="' + esc(e.id) + '"><span class="dot"></span>' +
         '<span class="m-body"><span class="m-from">' + esc(who) + '</span>' + (e.dir === 'in' && e.to ? '<span class="m-to">Primljeno na: ' + esc(e.to) + '</span>' : '') + '<span class="m-subj">' + esc(e.subject || '(bez predmeta)') + (e.att ? ' · privitak' : '') + '</span><span class="m-prev">' + esc(e.preview) + '</span></span>' +
-        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span><span class="m-del" role="button" tabindex="0" data-mdel="' + esc(e.id) + '" title="Obriši poruku" aria-label="Obriši poruku">🗑</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : (e.dir === 'in' && S.mail.imap2 ? '<span class="chip">Inbox 1</span>' : '')) + '</span></button>';
+        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span><span class="m-del" role="button" tabindex="0" data-mdel="' + esc(e.id) + '" title="Obriši poruku" aria-label="Obriši poruku"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg><b>Obriši</b></span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : (e.dir === 'in' && S.mail.imap2 ? '<span class="chip">Inbox 1</span>' : '')) + '</span></button>';
     }).join('');
   }
   async function syncInbox(force, quiet) {
@@ -778,7 +778,8 @@ function initApp() {
     $('rTpl').value = ''; ta.focus();
   }
   async function deleteMail(id, fromList) {
-    if (!confirm('Obrisati ovu poruku iz aplikacije? Radnja se ne može poništiti.')) return;
+    const em = S.emails.find((x) => x.id === id);
+    if (!(await confirmBox('Obrisati poruku?', (em ? '<b>' + esc(em.subject || '(bez predmeta)') + '</b><br><small>' + esc(em.dir === 'in' ? (em.fromName || em.fromEmail || '') : 'Za: ' + em.to) + '</small><br><br>' : '') + 'Poruka će biti obrisana iz aplikacije i premještena u smeće na poslužitelju. Radnja se ne može poništiti.', 'Da, obriši'))) return;
     let srv = '';
     const ok = await safe(async () => { const r = await call('email_delete', { id }); srv = r.server || ''; return r; }, '');
     if (ok) { toast(srv === 'moved' ? 'Poruka obrisana i premještena u smeće na poslužitelju' : (srv === 'error' ? 'Poruka obrisana u aplikaciji, ali premještanje u smeće na poslužitelju nije uspjelo' : (srv === 'notfound' ? 'Poruka obrisana (na poslužitelju nije pronađena)' : 'Poruka obrisana')), srv === 'error'); S.emails = S.emails.filter((x) => x.id !== id); if (fromList) renderInbox(); else closeTop(); await refresh(true); }
@@ -945,7 +946,14 @@ function initApp() {
     const m = $('toolModal'); m.querySelector('h2').textContent = title; m.querySelector('.sh-b').innerHTML = html; m.hidden = false;
     document.body.classList.add('lock');
   }
-  function toolClose() { $('toolModal').hidden = true; if ($('drawer').hidden && $('mdrawer').hidden) document.body.classList.remove('lock'); }
+  /* vlastiti dijalog potvrde (umjesto prozora preglednika) */
+  function confirmBox(title, html, yes) {
+    return new Promise((res) => {
+      S.cfRes = res;
+      toolModal(title, '<div class="cfbody"><div class="cficon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></div><p>' + html + '</p></div><div class="acts cfacts"><button class="btn" data-tool="cfno">Odustani</button><button class="btn danger" data-tool="cfyes">' + esc(yes || 'Da') + '</button></div>');
+    });
+  }
+  function toolClose() { if (S.cfRes) { const r = S.cfRes; S.cfRes = null; r(false); } $('toolModal').hidden = true; if ($('drawer').hidden && $('mdrawer').hidden) document.body.classList.remove('lock'); }
   const REASON = { 'OIB': 'isti OIB', 'e-mail': 'ista e-mail adresa', 'telefon': 'isti telefon', 'naziv': 'sličan naziv' };
   async function dupOpen() {
     toolModal('Duplikati klijenata', '<p class="muted">Tražim duplikate…</p>');
@@ -1040,6 +1048,8 @@ function initApp() {
       else if (t === 'impcheck') impCheck();
       else if (t === 'impgo') impGo();
       else if (t === 'impopen') impOpen();
+      else if (t === 'cfno') toolClose();
+      else if (t === 'cfyes') { const r = S.cfRes; S.cfRes = null; toolClose(); if (r) r(true); }
       else if (t === 'poolpage') poolLoad(+b.dataset.p);
       else if (t === 'poolopen') { const id = b.dataset.id; toolClose(); ensureClient(id).then((ok) => { if (ok) { renderAll(); openClient(id); } }); }
       return;
