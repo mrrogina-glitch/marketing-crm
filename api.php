@@ -1052,6 +1052,42 @@ try {
             out(['ok' => true]);
         }
 
+        case 'imap2_diag': {
+            $u = need_write();
+            need_admin($u);
+            $c = imap_cfg(2);
+            if ($c === null) {
+                throw new ApiError('Inbox 2 nije podešen.', 409);
+            }
+            $res = ['storedLastUid' => (int) (meta_get('imap_last_uid_2') ?? 0), 'storedValidity' => (int) (meta_get('imap_uidvalidity_2') ?? 0), 'lastError' => (string) (meta_get('imap_last_error_2') ?? ''), 'dbBox2' => (int) row('SELECT COUNT(*) AS c FROM emails WHERE mailbox = 2')['c']];
+            try {
+                $im = new ImapClient($c);
+                try {
+                    $sel = $im->select((string) ($c['folder'] ?? 'INBOX'));
+                    $uids = $im->uidSearch('ALL');
+                    $res += ['validity' => $sel['uidvalidity'], 'serverCount' => count($uids), 'maxUid' => $uids ? max($uids) : 0, 'newerThanStored' => count(array_filter($uids, static fn ($x) => $x > $res['storedLastUid']))];
+                    $last = [];
+                    foreach (array_slice($uids, -8) as $uid) {
+                        $m = $im->fetchMessage($uid, 6000);
+                        if (!$m) {
+                            $last[] = ['uid' => $uid, 'fetch' => false];
+                            continue;
+                        }
+                        $h = Mime::parse($m['raw'])['headers'];
+                        $mid = mb_substr(trim((string) ($h['message-id'] ?? ''), " <>\t"), 0, 190);
+                        $ex = $mid !== '' ? row('SELECT mailbox, direction FROM emails WHERE message_id = ?', [$mid]) : null;
+                        $last[] = ['uid' => $uid, 'date' => (string) ($h['date'] ?? ''), 'from' => mb_substr((string) ($h['from'] ?? ''), 0, 80), 'to' => mb_substr((string) ($h['to'] ?? ''), 0, 80), 'subject' => mb_substr(Mime::decodeHeader((string) ($h['subject'] ?? '')), 0, 80), 'inDb' => $ex ? ('mailbox ' . $ex['mailbox'] . ' ' . $ex['direction']) : 'ne'];
+                    }
+                    $res['last'] = $last;
+                } finally {
+                    $im->close();
+                }
+            } catch (Throwable $e) {
+                $res['error'] = $e->getMessage();
+            }
+            out($res);
+        }
+
         case 'imap2_save': {
             $u = need_write();
             need_admin($u);
