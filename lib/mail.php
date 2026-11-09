@@ -102,6 +102,13 @@ final class Mailer
             $common[] = 'Content-Transfer-Encoding: base64';
         }
 
+        $cc = self::clean((string) ($extra['Cc'] ?? ''));
+        if ($cc !== '' && (!filter_var($cc, FILTER_VALIDATE_EMAIL) || strcasecmp($cc, $to) === 0)) {
+            $cc = '';
+        }
+        if ($cc !== '') {
+            $common[] = 'Cc: ' . self::addr($cc, '');
+        }
         $toHeader = 'To: ' . self::addr($to, '');
         $subjHeader = 'Subject: ' . self::enc($subject);
         $message = implode("\r\n", array_merge([$toHeader, $subjHeader], $common)) . "\r\n\r\n" . $encBody;
@@ -112,7 +119,7 @@ final class Mailer
                 throw new MailException('PHP mail() nije prihvatio poruku.');
             }
         } else {
-            self::smtp($m, $from, $to, $message);
+            self::smtp($m, $from, $to, $message, $cc);
         }
         return ['message_id' => $messageId, 'raw' => $message];
     }
@@ -155,7 +162,7 @@ final class Mailer
         return self::enc($name) . ' <' . $email . '>';
     }
 
-    private static function smtp(array $m, string $from, string $to, string $message): void
+    private static function smtp(array $m, string $from, string $to, string $message, string $cc = ''): void
     {
         $host = (string) $m['host'];
         $port = (int) ($m['port'] ?? 465);
@@ -222,6 +229,9 @@ final class Mailer
             }
             $cmd('MAIL FROM:<' . $from . '>', [250]);
             $cmd('RCPT TO:<' . $to . '>', [250, 251]);
+            if ($cc !== '') {
+                $cmd('RCPT TO:<' . $cc . '>', [250, 251]);
+            }
             $cmd('DATA', [354]);
             $data = preg_replace('/^\./m', '..', $message);
             if (substr($data, -2) !== "\r\n") {

@@ -479,7 +479,7 @@ function client_for_email(string $email): ?int
     if ($email === '') {
         return null;
     }
-    $r = row('SELECT id FROM clients WHERE LOWER(email) = ? ORDER BY id LIMIT 1', [strtolower($email)]);
+    $r = row('SELECT id FROM clients WHERE LOWER(email) = ? OR LOWER(email2) = ? ORDER BY id LIMIT 1', [strtolower($email), strtolower($email)]);
     return $r ? (int) $r['id'] : null;
 }
 

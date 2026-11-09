@@ -246,6 +246,13 @@ function send_and_store(?array $u, string $to, string $subject, string $text, ?i
         $attachments[] = $f;
     }
     $extra = ($inReplyTo ? ['In-Reply-To' => $inReplyTo, 'References' => $inReplyTo] : []) + $headers;
+    if (!$auto && $clientId !== null && empty($extra['Cc'])) {
+        // dodatna adresa klijenta ide u kopiju (CC) kad se piše na glavnu adresu
+        $cr = row('SELECT email, email2 FROM clients WHERE id = ?', [$clientId]);
+        if ($cr && trim((string) $cr['email2']) !== '' && strcasecmp(trim((string) $cr['email']), trim($to)) === 0) {
+            $extra['Cc'] = trim((string) $cr['email2']);
+        }
+    }
     if ($auto) {
         $extra['Auto-Submitted'] = 'auto-replied';
         $extra['X-Auto-Response-Suppress'] = 'All';
