@@ -876,3 +876,11 @@ body{background:
 .pill{box-shadow:0 3px 8px -3px currentColor}
 .badge{box-shadow:0 3px 8px -2px color-mix(in srgb,var(--accent-2) 60%,transparent)}
 .poolbar{border-color:color-mix(in srgb,var(--c-klijenti) 45%,var(--line-2));background:color-mix(in srgb,var(--c-klijenti) 8%,var(--surface))}
+/* v5: čitljivost tablica i sitnih tekstova, Tim tablica bez rezanja */
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tscroll .tbl{min-width:980px}
+.tscroll .tbl th,.tscroll .tbl td{padding:10px 12px;vertical-align:middle}
+.tscroll .tbl td .who{white-space:nowrap}
+.tscroll .tbl th{white-space:normal;line-height:1.25}
+th,.tbl th,.rev thead th,.chead span{font-size:13px}
+small,.nums small,.hint,.muted.small,.alrow small,.li .a small{font-size:13.5px}
