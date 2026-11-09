@@ -855,9 +855,6 @@ try {
             if ($new === $c['status']) {
                 throw new ApiError('Status je već postavljen.');
             }
-            if ($new === 'aktivni' && (int) $c['camp_active'] !== 1) {
-                throw new ApiError('Status Aktivni postavlja se označavanjem opcije "Aktivni" uz upis kampanje (termin i vrijednost).');
-            }
             $t = ms();
             $label = ['novi' => 'Novi kontakt', 'kontaktiran' => 'Kontaktiran', 'ponuda' => 'Ponuda poslana', 'pregovori' => 'Pregovori', 'aktivni' => 'Aktivni', 'dobiven' => 'Dobiven', 'izgubljen' => 'Izgubljen'];
             transaction(static function () use ($c, $u, $new, $text, $t, $label): void {
