@@ -602,3 +602,8 @@ body.auth{background:radial-gradient(900px 500px at 15% 10%,color-mix(in srgb,va
 .tasks .tkopen:hover b{text-decoration:underline}
 
 .c-val small{display:block;color:var(--ink-2);font-size:11.5px}
+
+small.tr{display:inline-block;font-size:11px;font-weight:600;white-space:nowrap}
+small.tr.up{color:#1a7f37}small.tr.down{color:#c0392b}small.tr.eq{color:var(--ink-3);font-weight:500}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) small.tr.up{color:#4cc38a}:root:not([data-theme="light"]) small.tr.down{color:#ff7b6b}}
+:root[data-theme="dark"] small.tr.up{color:#4cc38a}:root[data-theme="dark"] small.tr.down{color:#ff7b6b}
