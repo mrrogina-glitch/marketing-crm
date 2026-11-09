@@ -631,7 +631,7 @@ function initApp() {
   }
   function filteredClients() {
     let a = S.clients.slice(); const q = S.q.trim().toLowerCase();
-    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.phone, c.service, c.oib, c.industry, c.address].some((v) => (v || '').toLowerCase().includes(q)));
+    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.email2, c.phone, c.service, c.oib, c.industry, c.address].some((v) => (v || '').toLowerCase().includes(q)));
     if (S.fStatus) a = a.filter((c) => c.status === S.fStatus);
     if (S.fOwner) a = a.filter((c) => c.ownerId === S.fOwner);
     if (S.fKind) a = a.filter((c) => (c.kind || 'tvrtka') === S.fKind);
@@ -1356,7 +1356,7 @@ function initApp() {
       '<label class="f">Vrsta klijenta<select id="iKind"><option value="tvrtka"' + (c.kind !== 'osoba' ? ' selected' : '') + '>Tvrtka</option><option value="osoba"' + (c.kind === 'osoba' ? ' selected' : '') + '>Fizička osoba</option></select></label>' +
       '<label class="f"><span><span id="iNameL">' + (c.kind === 'osoba' ? 'Ime i prezime' : 'Naziv tvrtke') + '</span> <span class="req">*</span></span><input id="iName" value="' + esc(c.name) + '"></label>' +
       '<label class="f" id="iContactW"' + (c.kind === 'osoba' ? ' hidden' : '') + '><span>Kontakt osoba <span class="req">*</span></span><input id="iContact" value="' + esc(c.kind === 'osoba' ? '' : c.contact) + '"></label><label class="f">OIB<input id="iOib" inputmode="numeric" maxlength="11" value="' + esc(c.oib || '') + '"></label>' +
-      '<label class="f">E-mail<input id="iEmail" type="email" value="' + esc(c.email) + '"></label><label class="f">Telefon<input id="iPhone" type="tel" value="' + esc(c.phone) + '"></label><label class="f wide">Adresa<input id="iAddr" maxlength="255" value="' + esc(c.address || '') + '"></label>' +
+      '<label class="f">E-mail<input id="iEmail" type="email" value="' + esc(c.email) + '"></label><label class="f">Telefon<input id="iPhone" type="tel" value="' + esc(c.phone) + '"></label><label class="f">Dodatni e-mail (u kopiji – CC)<input id="iEmail2" type="email" value="' + esc(c.email2 || '') + '" placeholder="nije obavezno"></label><label class="f wide">Adresa<input id="iAddr" maxlength="255" value="' + esc(c.address || '') + '"></label>' +
       '<label class="f">Djelatnost<input id="iIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću" value="' + esc(c.industry || '') + '"></label>' +
       '<div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="iService">' + svcBox(c.service) + '</div></div>' +
       '<label class="f">Prodavač<select id="iOwner">' + ownerOpts + '</select></label>' +
@@ -1472,7 +1472,7 @@ function initApp() {
     if (email && email.indexOf('@') < 1) { $('iMsg').textContent = 'E-mail adresa nije ispravna.'; return; }
     if ($('iContract').checked && !$('iContractEnd').value) { $('iMsg').textContent = 'Odaberite datum do kada je ugovor aktivan.'; $('iContractEnd').focus(); return; }
     $('iMsg').textContent = '';
-    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), address: $('iAddr').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), owner_id: $('iOwner').value, has_contract: $('iContract').checked, contract_end: $('iContractEnd').value }), 'Podaci spremljeni');
+    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), address: $('iAddr').value.trim(), email2: $('iEmail2').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), owner_id: $('iOwner').value, has_contract: $('iContract').checked, contract_end: $('iContractEnd').value }), 'Podaci spremljeni');
     if (ok) refresh(true);
   }
   async function renewCampaign() {
@@ -1604,7 +1604,7 @@ function initApp() {
   }
   function openNew(prefill) {
     S.lastFocus = document.activeElement;
-    ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nPhone', 'nValue', 'nFollow', 'nFollowT', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
+    ['nName', 'nContact', 'nOib', 'nIndustry', 'nEmail', 'nEmail2', 'nPhone', 'nValue', 'nFollow', 'nFollowT', 'nNote', 'nCampStart', 'nCampEnd', 'nCampValue'].forEach((i) => { $(i).value = ''; });
     $('nCamp').checked = false; $('nCampDates').hidden = true; $('nCampType').value = 'jednokratno'; $('nVKind').value = 'ponudeno'; if ($('nDup')) { $('nDup').hidden = true; $('nDup').innerHTML = ''; }
     S.nFromMail = prefill ? prefill.emailId || null : null; S.nGuess = prefill ? prefill.guess || '' : '';
     document.querySelectorAll('input[name="nKindR"]').forEach((r) => { r.checked = !prefill && r.value === 'tvrtka'; });
@@ -1612,7 +1612,7 @@ function initApp() {
     $('nService').innerHTML = svcBox('');
     fillSelect($('nStatus'), STAGES.filter((s) => OPEN[s.id]).map((s) => [s.id, s.label]), 'novi');
     fillSelect($('nOwner'), activeUsers().map((u) => [u.id, u.name + (u.id === S.me.id ? ' (ja)' : '')]), S.me.id);
-    if (prefill) { $('nEmail').value = prefill.email || ''; $('nNote').value = prefill.note || ''; }
+    if (prefill) { $('nEmail').value = prefill.email || ''; $('nEmail').dispatchEvent(new Event('input', { bubbles: true })); $('nNote').value = prefill.note || ''; }
     $('nMsg').textContent = '';
     $('mNew').hidden = false; document.body.classList.add('lock');
     $('nName').focus(); setTimeout(checkDupes, 0);
@@ -1626,12 +1626,13 @@ function initApp() {
     if (!contact) { m.textContent = 'Upišite kontakt osobu.'; $('nContact').focus(); return; }
     if (oib && !/^\d{11}$/.test(oib)) { m.textContent = 'OIB mora imati 11 znamenki.'; $('nOib').focus(); return; }
     if (email && email.indexOf('@') < 1) { m.textContent = 'E-mail adresa nije ispravna.'; $('nEmail').focus(); return; }
+    if ($('nEmail2').value.trim() && $('nEmail2').value.indexOf('@') < 1) { m.textContent = 'Dodatna e-mail adresa nije ispravna.'; $('nEmail2').focus(); return; }
     if (note.length < 3) { m.textContent = 'Prva bilješka je obavezna.'; $('nNote').focus(); return; }
     if ($('nCamp').checked && !$('nCampEnd').value) { m.textContent = 'Odaberite točan datum do kada je kampanja aktivna.'; $('nCampEnd').focus(); return; }
     if ($('nCamp').checked && $('nCampValue').value === '') { m.textContent = 'Upišite vrijednost kampanje.'; $('nCampValue').focus(); return; }
     m.textContent = ''; $('nSave').disabled = true;
     try {
-      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, value_kind: $('nVKind').value, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, next_follow_time: $('nFollowT').value, camp_active: $('nCamp').checked, camp_type: $('nCampType').value, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
+      const r = await call('client_create', { kind, oib, email_id: S.nFromMail || undefined, name, contact, email, email2: $('nEmail2').value.trim(), phone: $('nPhone').value.trim(), service: svcRead('nService'), industry: $('nIndustry').value.trim(), value: Number($('nValue').value) || 0, value_kind: $('nVKind').value, status: $('nStatus').value, owner_id: $('nOwner').value, next_follow_up: $('nFollow').value, next_follow_time: $('nFollowT').value, camp_active: $('nCamp').checked, camp_type: $('nCampType').value, camp_start: $('nCampStart').value, camp_end: $('nCampEnd').value, camp_value: Number($('nCampValue').value) || 0, note });
       toast('Klijent spremljen');
       $('mNew').hidden = true;
       await refresh(true);
@@ -1909,6 +1910,7 @@ function initApp() {
     fillSelect($('mTpl'), [['', '(prazna poruka)']].concat(tpls.map((t) => [t.id, t.name])), '');
     const pick = (tplPrefix && tpls.find((t) => t.name.toLowerCase().startsWith(tplPrefix.toLowerCase()))) || tpls[0];
     $('mTo').value = c.email || '';
+    $('mCc').hidden = !c.email2; $('mCc').textContent = c.email2 ? 'Kopija (CC): ' + c.email2 : '';
     if (pick) { $('mTpl').value = pick.id; const t = fillTpl(pick, c); $('mSubj').value = t.subject; $('mBody').value = t.body; } else { $('mSubj').value = ''; $('mBody').value = ''; }
     $('mSig').textContent = S.me.signatureEffective || '';
     $('mWhen').value = 'now'; $('mAtW').hidden = true; $('mAt').value = defaultSendAt(); $('mRemind').value = '3';
@@ -2012,7 +2014,7 @@ function initApp() {
       else if (act === 'mkclient') {
         const e = S.emails.find((x) => x.id === a.dataset.id); if (!e) return;
         $('mdrawer').hidden = true;
-        openNew({ emailId: e.id, guess: e.fromName || '', email: e.fromEmail, note: 'Upit e-mailom: ' + (e.subject || '(bez predmeta)') + '\n' + e.preview });
+        openNew({ emailId: e.id, guess: e.fromName || '', email: e.replyTo || e.fromEmail, note: 'Upit e-mailom: ' + (e.subject || '(bez predmeta)') + '\n' + e.preview });
       }
       else if (act === 'take') { if (confirm('Preuzeti klijenta ' + (byId(S.openId) || {}).name + '? Od sada ga vodite vi, a prodaja se do sada vodi na prethodnog prodavača.')) safe(() => call('client_take', { id: S.openId }), 'Klijent preuzet').then(async (ok) => { if (ok) { await refresh(true); openClient(S.openId, true); } }); }
       else if (act === 'docdel') safe(() => call('doc_delete', { id: a.dataset.id }), 'Dokument obrisan').then((ok) => { if (ok) refresh(true); });
