@@ -1079,6 +1079,26 @@ try {
                         $last[] = ['uid' => $uid, 'date' => (string) ($h['date'] ?? ''), 'from' => mb_substr((string) ($h['from'] ?? ''), 0, 80), 'to' => mb_substr((string) ($h['to'] ?? ''), 0, 80), 'subject' => mb_substr(Mime::decodeHeader((string) ($h['subject'] ?? '')), 0, 80), 'inDb' => $ex ? ('mailbox ' . $ex['mailbox'] . ' ' . $ex['direction']) : 'ne'];
                     }
                     $res['last'] = $last;
+                    if (!empty(body()['probe'])) {
+                        $probe = [];
+                        $newer = array_values(array_filter($uids, static fn ($x) => $x > $res['storedLastUid']));
+                        @set_time_limit(120);
+                        foreach (array_slice($newer, 0, 12) as $uid) {
+                            $t0 = microtime(true);
+                            try {
+                                $m = $im->fetchMessage($uid, 12000000);
+                                $r = ['uid' => $uid, 'size' => $m ? strlen($m['raw']) : null];
+                                if ($m) {
+                                    $r['stored'] = store_incoming($m['raw'], $uid, $m['seen'], strlen($m['raw']) < 12000000, 2);
+                                }
+                            } catch (Throwable $e) {
+                                $r = ['uid' => $uid, 'exception' => get_class($e) . ': ' . $e->getMessage()];
+                            }
+                            $r['sec'] = round(microtime(true) - $t0, 2);
+                            $probe[] = $r;
+                        }
+                        $res['probe'] = $probe;
+                    }
                 } finally {
                     $im->close();
                 }
