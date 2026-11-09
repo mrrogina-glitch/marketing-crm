@@ -761,3 +761,15 @@ small.tr.down{font-weight:650}
 .cfacts{justify-content:flex-end}
 .cfacts .btn.danger{background:#dc2626;color:#fff;border-color:#dc2626}
 .cfacts .btn.danger:hover{background:#b91c1c}
+/* poruka preko cijelog ekrana */
+#mdrawer .sheet{width:100%;max-width:none;height:100%;border-radius:0;border:0}
+#mdrawer .sheet>.sh-h,#mdrawer .sheet>.sh-b,#mdrawer .sheet>.sec,#mdrawer .sheet>div:not(.sh-h){max-width:1000px;margin-left:auto;margin-right:auto;width:100%;box-sizing:border-box}
+#mdrawer .mailbody{max-height:none}
+#mdrawer .compose textarea{min-height:220px}
+.rattach{display:flex;align-items:center;gap:10px;margin:8px 0;flex-wrap:wrap}
+.rattach .btn svg{vertical-align:-3px}
+.rfiles{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:6px}
+.rfiles li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--sunken,rgba(100,116,139,.08))}
+.rfiles li small{color:var(--ink-3);margin-left:6px}
+.rfiles .x{border:0;background:none;cursor:pointer;font-size:18px;line-height:1;color:var(--ink-3)}
+.rfiles .x:hover{color:#dc2626}

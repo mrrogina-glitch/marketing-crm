@@ -734,7 +734,7 @@ function initApp() {
 
   /* ---------- mail reader ---------- */
   async function openMailItem(id) {
-    S.lastFocus = document.activeElement; S.openMailId = id;
+    S.lastFocus = document.activeElement; S.openMailId = id; S.rFiles = [];
     const sh = $('rSheet');
     sh.innerHTML = '<div class="sh-h"><h2 id="rSubject">Učitavanje…</h2><button class="x" data-act="close" aria-label="Zatvori">×</button></div>';
     $('mdrawer').hidden = false; document.body.classList.add('lock');
@@ -758,7 +758,7 @@ function initApp() {
     h += '</div><div class="sec"><h3>Poruka</h3><div class="mailbody">' + esc(e.body) + '</div><div class="acts" style="margin-top:10px"><button class="btn sm danger" data-act="maildel" data-id="' + esc(e.id) + '">Obriši poruku</button><span class="hint">Briše poruku iz aplikacije (ne i sa poslužitelja e-pošte).</span></div></div>';
     {
       const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
-      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose">' + replyTplSelect() + '<textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
+      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose">' + replyTplSelect() + '<textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="rattach"><label class="btn sm filebtn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9-9a3.7 3.7 0 015.2 5.2l-9 9a1.8 1.8 0 01-2.6-2.6l8.4-8.4"/></svg> Dodaj privitak<input type="file" id="rFile" multiple hidden></label><span class="hint">najviše 10 datoteka, ukupno 15 MB</span></div><ul class="rfiles" id="rFiles"></ul><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
         '<p class="hint">Odgovor odlazi s adrese ' + esc(e.box === 2 && S.mail.from2 ? S.mail.from2 : S.mail.from) + ' (sandučić na koji je poruka stigla) na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
     }
     h += '</div>';
@@ -788,8 +788,23 @@ function initApp() {
     const ta = $('rBody'); const body = ta.value.trim();
     if (body.length < 2) { $('rMsg').textContent = 'Upišite tekst odgovora.'; ta.focus(); return; }
     $('rMsg').textContent = '';
-    const ok = await safe(() => call('email_reply', { email_id: id, body }), 'Odgovor poslan');
-    if (ok) { closeTop(); refresh(true); }
+    const files = S.rFiles || [];
+    if (files.reduce((s, f) => s + f.size, 0) > 15 * 1024 * 1024) { $('rMsg').textContent = 'Privici zajedno smiju imati najviše 15 MB.'; return; }
+    if (files.length > 10) { $('rMsg').textContent = 'Najviše 10 privitaka po poruci.'; return; }
+    const ok = await safe(async () => {
+      if (!files.length) return call('email_reply', { email_id: id, body });
+      const fd = new FormData(); fd.append('data', JSON.stringify({ email_id: id, body })); files.forEach((f) => fd.append('files[]', f, f.name));
+      const res = await fetch('api.php?a=email_reply', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF': S.csrf }, body: fd });
+      let d = null; try { d = await res.json(); } catch (e) { /* ignore */ }
+      if (!res.ok) throw new Error((d && d.error) || 'Slanje nije uspjelo.');
+      return d;
+    }, 'Odgovor poslan');
+    if (ok) { S.rFiles = []; closeTop(); refresh(true); }
+  }
+  function renderReplyFiles() {
+    const ul = $('rFiles'); if (!ul) return;
+    const fs = S.rFiles || [];
+    ul.innerHTML = fs.map((f, i) => '<li><span>' + esc(f.name) + ' <small>' + (f.size >= 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(f.size / 1024)) + ' KB') + '</small></span><button type="button" class="x" data-act="rfdel" data-i="' + i + '" aria-label="Ukloni privitak">×</button></li>').join('');
   }
 
   /* ---------- team ---------- */
@@ -1991,6 +2006,7 @@ function initApp() {
       else if (act === 'tmapply') { const f = $('tmFrom').value, t2 = $('tmTo').value; if (!f || !t2 || f > t2) { toast('Upišite ispravno razdoblje (Od ne smije biti iza Do).', true); return; } S.tmFrom = f; S.tmTo = t2; S.period = 'custom'; renderTeam(); }
       else if (act === 'sync' || act === 'syncnow') syncInbox(true, false);
       else if (act === 'reply') sendReply(a.dataset.id);
+      else if (act === 'rfdel') { (S.rFiles || []).splice(+a.dataset.i, 1); renderReplyFiles(); }
       else if (act === 'link') { const v = $('rLink').value; if (v) safe(() => call('email_link', { email_id: a.dataset.id, client_id: v }), 'Poruka povezana').then((ok) => { if (ok) refresh(true).then(() => openMailItem(a.dataset.id)); }); }
       else if (act === 'unlink') safe(() => call('email_link', { email_id: a.dataset.id, client_id: null }), 'Poruka odvojena').then((ok) => { if (ok) refresh(true).then(() => openMailItem(a.dataset.id)); });
       else if (act === 'mkclient') {
@@ -2038,6 +2054,7 @@ function initApp() {
     if (t.classList && t.classList.contains('overlay')) closeTop();
   });
   document.addEventListener('change', (ev) => {
+    if (ev.target && ev.target.id === 'rFile') { S.rFiles = (S.rFiles || []).concat(Array.from(ev.target.files)); ev.target.value = ''; renderReplyFiles(); return; }
     const id = ev.target.id;
     if (id === 'stSel') onStatusChange();
     else if (id === 'fStatus') { S.fStatus = ev.target.value; renderClients(); }
