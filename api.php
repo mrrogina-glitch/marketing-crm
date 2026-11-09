@@ -138,6 +138,7 @@ function client_out(array $r): array
         'contact' => (string) $r['contact'],
         'email' => (string) $r['email'],
         'phone' => (string) $r['phone'],
+        'address' => (string) ($r['address'] ?? ''),
         'service' => (string) $r['service'],
         'industry' => (string) ($r['industry'] ?? ''),
         'value' => (float) $r['value'],
@@ -892,6 +893,9 @@ try {
                 if ($campA === 1) {
                     mark_client_active($c, (int) $u['id'], ms());
                 }
+            }
+            if (array_key_exists('address', $in)) {
+                run('UPDATE clients SET address = ? WHERE id = ?', [mb_substr(trim((string) $in['address']), 0, 255), $c['id']]);
             }
             link_emails_to_client((int) $c['id'], strtolower($email));
             $diff = client_diff($c, $newVals);
@@ -1786,18 +1790,21 @@ try {
                 throw new ApiError('Pregled uvoza je istekao. Učitajte datoteku ponovno.', 404);
             }
             $j = json_decode((string) file_get_contents(storage_dir() . '/import-' . $tok . '.json'), true);
-            $owner = active_user_id($in['owner_id'] ?? null, (int) $u['id']);
-            $withDup = ($in['mode'] ?? 'skip') === 'all';
+            $noOwner = ($in['owner_id'] ?? '') === 'none';
+            $owner = $noOwner ? null : active_user_id($in['owner_id'] ?? null, (int) $u['id']);
+            $mode = (string) ($in['mode'] ?? 'skip');
+            $withDup = $mode === 'all';
+            $forceStatus = in_array((string) ($in['status'] ?? ''), ['novi', 'kontaktiran', 'ponuda', 'pregovori', 'aktivni', 'dobiven', 'izgubljen'], true) ? (string) $in['status'] : '';
             $statusMap = ['novi' => 'novi', 'novi kontakt' => 'novi', 'kontaktiran' => 'kontaktiran', 'ponuda' => 'ponuda', 'ponuda poslana' => 'ponuda', 'pregovori' => 'pregovori', 'aktivni' => 'aktivni', 'dobiven' => 'dobiven', 'izgubljen' => 'izgubljen'];
             $made = $skipDup = $skipBad = 0;
             $t = ms();
-            transaction(static function () use ($j, $owner, $withDup, $statusMap, $u, $t, &$made, &$skipDup, &$skipBad): void {
+            transaction(static function () use ($j, $owner, $withDup, $mode, $forceStatus, $statusMap, $u, $t, &$made, &$skipDup, &$skipBad): void {
                 foreach ($j['rows'] as $r) {
                     if ($r['errors']) {
                         $skipBad++;
                         continue;
                     }
-                    if ($r['dup'] && !$withDup) {
+                    if ($r['dup'] && !$withDup && !($mode === 'oib' && $r['dup']['type'] !== 'oib')) {
                         $skipDup++;
                         continue;
                     }
@@ -1806,15 +1813,15 @@ try {
                     $kind = preg_match('/osob|fiz/u', $kindRaw) ? 'osoba' : 'tvrtka';
                     $name = mb_substr((string) $rec['name'], 0, 190);
                     $contact = $kind === 'osoba' ? $name : mb_substr((string) ($rec['contact'] ?? ''), 0, 190);
-                    $status = $statusMap[mb_strtolower((string) ($rec['status'] ?? ''))] ?? 'novi';
+                    $status = $forceStatus !== '' ? $forceStatus : ($statusMap[mb_strtolower((string) ($rec['status'] ?? ''))] ?? 'novi');
                     $val = (string) ($rec['value'] ?? '');
                     $val = num_hr($val);
                     $svc = f_services((string) ($rec['service'] ?? ''));
                     $ind = mb_substr(trim((string) ($rec['industry'] ?? '')), 0, 120);
                     $note = 'Uvezeno iz datoteke ' . mb_substr((string) $j['name'], 0, 80) . '.' . (!empty($rec['note']) ? "\n" . mb_substr((string) $rec['note'], 0, 1500) : '');
-                    run('INSERT INTO clients (kind, oib, name, contact, email, phone, service, industry, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, NULL, NULL, 0)',
-                        [$kind, (string) ($rec['oib_fixed'] ?? ''), $name, $contact, strtolower((string) ($rec['email'] ?? '')), mb_substr((string) ($rec['phone'] ?? ''), 0, 60), $svc, $ind, $val, $status, $owner, $status === 'dobiven' ? $t : null, $u['id'], $t, $t]);
+                    run('INSERT INTO clients (kind, oib, name, contact, email, phone, address, service, industry, value, status, owner_id, next_follow_up, won_at, created_by, created_at, updated_at, camp_active, camp_start, camp_end, camp_value)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, NULL, NULL, 0)',
+                        [$kind, (string) ($rec['oib_fixed'] ?? ''), $name, $contact, strtolower((string) ($rec['email'] ?? '')), mb_substr((string) ($rec['phone'] ?? ''), 0, 60), mb_substr((string) ($rec['address'] ?? ''), 0, 255), $svc, $ind, $val, $status, $owner, $status === 'dobiven' ? $t : null, $u['id'], $t, $t]);
                     $cid = insert_id();
                     record_owner($cid, (int) $owner, $t);
                     run('INSERT INTO notes (client_id, author_id, type, body, created_at) VALUES (?, ?, ?, ?, ?)', [$cid, $u['id'], 'note', $note, $t]);
