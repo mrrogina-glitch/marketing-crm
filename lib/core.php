@@ -267,6 +267,14 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        17 => [
+            "ALTER TABLE tasks ADD descr TEXT NULL",
+            "ALTER TABLE tasks ADD taken_at $big NULL",
+            "ALTER TABLE tasks ADD taken_by $big NULL",
+            "ALTER TABLE tasks ADD done_by $big NULL",
+            "CREATE TABLE task_notes (id $pk, task_id $big NOT NULL, user_id $big NOT NULL, kind VARCHAR(8) NOT NULL DEFAULT 'note', body TEXT NOT NULL, created_at $big NOT NULL)$opt",
+            "CREATE INDEX ix_task_notes ON task_notes (task_id, created_at)",
+        ],
         16 => [
             "ALTER TABLE clients ADD industry VARCHAR(120) NOT NULL DEFAULT ''",
         ],

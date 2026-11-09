@@ -811,22 +811,39 @@ function client_diff(array $old, array $new): string
 
 /* ---------- zadaci ---------- */
 
-function task_out(array $r): array
+function task_out(array $r, array $notes = []): array
 {
     return ['id' => (string) $r['id'], 'clientId' => $r['client_id'] !== null ? (string) $r['client_id'] : '', 'title' => (string) $r['title'],
+        'descr' => (string) ($r['descr'] ?? ''),
         'due' => (string) ($r['due_date'] ?? ''), 'assigneeId' => (string) $r['assignee_id'], 'createdBy' => (string) $r['created_by'],
-        'createdAt' => (int) $r['created_at'], 'doneAt' => $r['done_at'] !== null ? (int) $r['done_at'] : 0];
+        'createdAt' => (int) $r['created_at'],
+        'takenAt' => !empty($r['taken_at']) ? (int) $r['taken_at'] : 0, 'takenBy' => !empty($r['taken_by']) ? (string) $r['taken_by'] : '',
+        'doneAt' => $r['done_at'] !== null ? (int) $r['done_at'] : 0, 'doneBy' => !empty($r['done_by']) ? (string) $r['done_by'] : '',
+        'notes' => $notes];
+}
+
+/** Administrator vidi sve zadatke, korisnik samo one čiji je izvršitelj. */
+function task_visible(array $u, array $t): bool
+{
+    return $u['role'] === 'admin' || (int) $t['assignee_id'] === (int) $u['id'];
 }
 
 function tasks_for(array $u): array
 {
-    $since = ms() - 7 * DAY_MS;
+    $since = ms() - 30 * DAY_MS;
     if ($u['role'] === 'admin') {
         $rs = rows('SELECT * FROM tasks WHERE done_at IS NULL OR done_at > ? ORDER BY id', [$since]);
     } else {
-        $rs = rows('SELECT * FROM tasks WHERE (assignee_id = ? OR created_by = ?) AND (done_at IS NULL OR done_at > ?) ORDER BY id', [$u['id'], $u['id'], $since]);
+        $rs = rows('SELECT * FROM tasks WHERE assignee_id = ? AND (done_at IS NULL OR done_at > ?) ORDER BY id', [$u['id'], $since]);
     }
-    return array_map('task_out', $rs);
+    $notes = [];
+    if ($rs) {
+        $ids = implode(',', array_map(static fn ($r) => (int) $r['id'], $rs));
+        foreach (rows('SELECT * FROM task_notes WHERE task_id IN (' . $ids . ') ORDER BY created_at, id') as $n) {
+            $notes[(int) $n['task_id']][] = ['id' => (string) $n['id'], 'userId' => (string) $n['user_id'], 'kind' => (string) $n['kind'], 'body' => (string) $n['body'], 'at' => (int) $n['created_at']];
+        }
+    }
+    return array_map(static fn ($r) => task_out($r, $notes[(int) $r['id']] ?? []), $rs);
 }
 
 /* ---------- prihod od kampanja ---------- */
