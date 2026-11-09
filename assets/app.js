@@ -608,7 +608,7 @@ function initApp() {
     h += a.map((c) => {
       const t = lastTs(c); const st = isStale(c); const du = isDue(c);
       return '<button class="crow" data-open="' + esc(c.id) + '">' +
-        '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">kampanja do ' + esc(fmtYmd(c.campEnd)) + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
+        '<span class="c-main"><b>' + esc(c.name) + (campActive(c) ? ' <span class="chip ' + (campShort(c) ? 'short' : 'camp') + '">kampanja do ' + esc(fmtYmd(c.campEnd)) + '</span>' : '') + (c.hasContract ? ' <span class="chip ' + (c.contractEnd && c.contractEnd < today() ? 'short' : 'camp') + '">ugovor' + (c.contractEnd ? ' do ' + esc(fmtYmd(c.contractEnd)) : '') + '</span>' : '') + '</b><small>' + (c.kind === 'osoba' ? 'fizička osoba' : esc(c.contact)) + (c.industry ? ' · ' + esc(c.industry) : '') + '</small></span>' +
         '<span class="c-svc">' + esc(c.service) + '</span><span class="c-st">' + pill(c.status) + '</span>' +
         '<span class="c-val">' + (c.value ? eur(c.value) + '<small>' + (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'ponuđeno') + '</small>' : '') + '</span><span class="c-own">' + esc(person(c.ownerId)) + '</span>' +
         '<span class="c-note' + (st ? ' flag-stale' : '') + '" data-l="Zadnji kontakt:">' + esc(t ? rel(t) : 'nema bilješki') + '</span>' +
@@ -1206,6 +1206,10 @@ function initApp() {
       '<label class="f">Djelatnost<input id="iIndustry" list="industryList" maxlength="120" autocomplete="off" placeholder="upišite ili odaberite postojeću" value="' + esc(c.industry || '') + '"></label>' +
       '<div class="f"><span>Usluga (možete odabrati više)</span><div class="svcbox" id="iService">' + svcBox(c.service) + '</div></div>' +
       '<label class="f">Prodavač<select id="iOwner">' + ownerOpts + '</select></label>' +
+      '<div class="f wide campbox" id="contractBox"><label class="chk"><input type="checkbox" id="iContract"' + (c.hasContract ? ' checked' : '') + '> Klijent ima ugovor</label>' +
+      '<div id="iContractW"' + (c.hasContract ? '' : ' hidden') + '><label class="f">Ugovor vrijedi do <span class="req">*</span><input id="iContractEnd" type="date" value="' + esc(c.contractEnd || '') + '"></label>' +
+      '<div class="campnote">Datoteka ugovora (PDF ili Word)</div><ul class="docs" id="contractList"></ul>' +
+      '<div class="acts"><label class="btn sm filebtn">Dodaj ugovor<input type="file" id="contractFile" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></label><span class="hint" id="contractMsg">PDF ili Word, najviše 10 MB</span></div></div></div>' +
       '</div>' +
       '<div class="msg" id="iMsg" role="alert"></div><div class="row-btns start" style="margin-top:6px"><button class="btn" data-act="saveinfo">Spremi podatke</button></div></details>' +
       (canDelete(c) ? '<div class="danger-z"><button class="btn danger sm" data-act="del1">Obriši klijenta</button><span id="delConfirm" hidden><span class="hint">Briše klijenta i sve njegove bilješke. Ne može se poništiti. </span><button class="btn danger sm" data-act="del2">Da, obriši</button></span></div>' : '') + '</div>';
@@ -1222,8 +1226,13 @@ function initApp() {
     $('dPill').innerHTML = pill(c.status);
     $('dSub').textContent = (c.kind === 'osoba' ? 'Fizička osoba' : (c.contact || '')) + (c.industry ? ' · ' + c.industry : '') + ' · Prodavač: ' + person(c.ownerId);
     const docs = (S.docsByClient && S.docsByClient.get(c.id)) || [];
+    if ($('contractList')) {
+      const cd = docs.filter((d) => d.contract);
+      $('contractList').innerHTML = cd.length ? cd.map((d) => '<li><a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a><span class="hint">' + esc(fmtSize(d.size)) + ' · ' + fmtDate(d.createdAt) + '</span>' +
+        ((isAdmin() || d.by === S.me.id || String(c.ownerId) === String(S.me.id)) ? '<button class="btn sm danger" data-act="docdel" data-id="' + esc(d.id) + '">Obriši</button>' : '') + '</li>').join('') : '<li class="hint">Ugovor još nije učitan.</li>';
+    }
     $('docCount').textContent = docs.length ? docs.length + ' ' + plural(docs.length, 'datoteka', 'datoteka') : '';
-    $('docList').innerHTML = docs.length ? docs.map((d) => '<li><a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a><span class="hint">' + esc(fmtSize(d.size)) + ' · ' + fmtDate(d.createdAt) + (d.emailId ? ' · iz e-maila' : '') + '</span>' +
+    $('docList').innerHTML = docs.length ? docs.map((d) => '<li><a class="doclink" href="api.php?a=doc_download&id=' + encodeURIComponent(d.id) + '">' + esc(d.name) + '</a><span class="hint">' + esc(fmtSize(d.size)) + ' · ' + fmtDate(d.createdAt) + (d.emailId ? ' · iz e-maila' : '') + (d.contract ? ' · ugovor' : '') + '</span>' +
       ((isAdmin() || d.by === S.me.id || String(c.ownerId) === String(S.me.id)) ? '<button class="btn sm danger" data-act="docdel" data-id="' + esc(d.id) + '">Obriši</button>' : '') + '</li>').join('') : '<li class="hint">Nema dokumenata. Dodajte ponudu, ugovor ili drugi dokument.</li>';
     const sc = S.scheduled.filter((x) => x.clientId === c.id);
     const tk = S.tasks.filter((t) => t.clientId === c.id).sort((a, b) => (a.doneAt ? 1 : 0) - (b.doneAt ? 1 : 0) || a.due.localeCompare(b.due));
@@ -1307,8 +1316,9 @@ function initApp() {
     if (!name || (kind === 'tvrtka' && !contact)) { $('iMsg').textContent = kind === 'osoba' ? 'Ime i prezime je obavezno.' : 'Tvrtka i kontakt osoba su obavezni.'; return; }
     if (oib && !/^\d{11}$/.test(oib)) { $('iMsg').textContent = 'OIB mora imati 11 znamenki.'; return; }
     if (email && email.indexOf('@') < 1) { $('iMsg').textContent = 'E-mail adresa nije ispravna.'; return; }
+    if ($('iContract').checked && !$('iContractEnd').value) { $('iMsg').textContent = 'Odaberite datum do kada je ugovor aktivan.'; $('iContractEnd').focus(); return; }
     $('iMsg').textContent = '';
-    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), owner_id: $('iOwner').value }), 'Podaci spremljeni');
+    const ok = await safe(() => call('client_update', { id: c.id, kind, oib, name, contact: kind === 'osoba' ? name : contact, email, phone: $('iPhone').value.trim(), service: svcRead('iService'), industry: $('iIndustry').value.trim(), owner_id: $('iOwner').value, has_contract: $('iContract').checked, contract_end: $('iContractEnd').value }), 'Podaci spremljeni');
     if (ok) refresh(true);
   }
   async function renewCampaign() {
@@ -1652,14 +1662,21 @@ function initApp() {
     renderMailDocs();
     $('mMail').hidden = false; ($('mTo').value ? $('mSubj') : $('mTo')).focus();
   }
-  async function uploadDoc(file, clientId) {
+  async function uploadDoc(file, clientId, contract) {
     if (file.size > 10 * 1048576) throw new Error('Datoteka je prevelika (najviše 10 MB).');
-    const fd = new FormData(); fd.append('client_id', clientId); fd.append('file', file);
+    const fd = new FormData(); fd.append('client_id', clientId); fd.append('file', file); if (contract) fd.append('contract', '1');
     const res = await fetch('api.php?a=doc_upload', { method: 'POST', credentials: 'same-origin', headers: activeHdr({ 'X-CSRF': S.csrf }), body: fd });
     let d = null; try { d = await res.json(); } catch (e) { /* ignore */ }
     if (res.status === 401) { location.reload(); throw new Error('Sesija je istekla.'); }
     if (!res.ok) throw new Error((d && d.error) || 'Učitavanje datoteke nije uspjelo.');
     return d.id;
+  }
+  async function onContractFile(input) {
+    const f = input.files && input.files[0]; input.value = ''; const cid = S.openId; if (!f || !cid) return;
+    const msg = $('contractMsg');
+    if (!/\.(pdf|docx?)$/i.test(f.name)) { msg.textContent = 'Ugovor mora biti PDF ili Word datoteka.'; return; }
+    msg.textContent = 'Učitavam…';
+    try { await uploadDoc(f, cid, true); await refresh(true); $('contractMsg').textContent = 'Ugovor dodan.'; } catch (e) { msg.textContent = e.message; }
   }
   async function onDocFile(input, inMail) {
     const f = input.files && input.files[0]; input.value = '';
@@ -1785,6 +1802,8 @@ function initApp() {
     else if (id === 'cCamp' || id === 'iCamp' || id === 'nCamp') { const p = id[0]; $(p + 'CampDates').hidden = !ev.target.checked; if (ev.target.checked && !$(p + 'CampStart').value) $(p + 'CampStart').value = today(); }
     else if (id === 'mWhen') { const l = ev.target.value === 'later'; $('mAtW').hidden = !l; $('mSend').textContent = l ? 'Zakaži slanje' : 'Pošalji e-mail'; }
     else if (id === 'docFile') onDocFile(ev.target, false);
+    else if (id === 'contractFile') onContractFile(ev.target);
+    else if (id === 'iContract') { $('iContractW').hidden = !ev.target.checked; }
     else if (id === 'mFile') onDocFile(ev.target, true);
     else if (ev.target.dataset && ev.target.dataset.doc) { if (ev.target.checked) S.mailDocs.add(ev.target.dataset.doc); else S.mailDocs.delete(ev.target.dataset.doc); }
     else if (id === 'fSort') { S.sort = ev.target.value; renderClients(); }
