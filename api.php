@@ -1079,6 +1079,10 @@ try {
                         $last[] = ['uid' => $uid, 'date' => (string) ($h['date'] ?? ''), 'from' => mb_substr((string) ($h['from'] ?? ''), 0, 80), 'to' => mb_substr((string) ($h['to'] ?? ''), 0, 80), 'subject' => mb_substr(Mime::decodeHeader((string) ($h['subject'] ?? '')), 0, 80), 'inDb' => $ex ? ('mailbox ' . $ex['mailbox'] . ' ' . $ex['direction']) : 'ne'];
                     }
                     $res['last'] = $last;
+                    $rg = $im->uidSearch(($res['storedLastUid'] + 1) . ':*');
+                    $res['rangeSearch'] = ['count' => count($rg), 'first' => array_slice($rg, 0, 3), 'last' => array_slice($rg, -3)];
+                    $res['lock'] = (string) (meta_get('sync_lock') ?? '');
+                    $res['tryUid'] = (string) (meta_get('imap_try_uid_2') ?? '');
                     if (!empty(body()['probe'])) {
                         $probe = [];
                         $newer = array_values(array_filter($uids, static fn ($x) => $x > $res['storedLastUid']));
