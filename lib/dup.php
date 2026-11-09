@@ -116,7 +116,7 @@ function clients_merge(int $keepId, array $removeIds, int $userId): array
                 continue;
             }
             $fill = [];
-            foreach (['oib', 'email', 'phone', 'contact', 'service'] as $f) {
+            foreach (['oib', 'email', 'phone', 'contact', 'service', 'industry'] as $f) {
                 if ((string) ($keep[$f] ?? '') === '' && (string) ($r[$f] ?? '') !== '') {
                     $fill[$f] = $r[$f];
                     $keep[$f] = $r[$f];
@@ -275,6 +275,7 @@ const IMPORT_MAP = [
     'email' => ['email', 'e-mail', 'mail', 'emailadresa', 'e-mailadresa', 'epošta', 'eposta'],
     'phone' => ['telefon', 'tel', 'mobitel', 'gsm', 'phone', 'mob', 'brojtelefona'],
     'service' => ['usluga', 'usluge', 'service'],
+    'industry' => ['djelatnost', 'djelatnosti', 'industry', 'branša', 'bransa', 'sektor', 'nacekod', 'nacedjelatnost'],
     'value' => ['vrijednost', 'iznos', 'value', 'cijena'],
     'status' => ['status', 'faza'],
     'note' => ['napomena', 'bilješka', 'biljeska', 'opis', 'note', 'komentar'],

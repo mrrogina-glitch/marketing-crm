@@ -267,6 +267,9 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        16 => [
+            "ALTER TABLE clients ADD industry VARCHAR(120) NOT NULL DEFAULT ''",
+        ],
         14 => [
             "CREATE TABLE mail_batches (batch VARCHAR(24) NOT NULL PRIMARY KEY, user_id $big NOT NULL, subject VARCHAR(255) NOT NULL, body TEXT NOT NULL, total INT NOT NULL DEFAULT 0, send_at $big NOT NULL, status VARCHAR(12) NOT NULL DEFAULT 'approved', created_at $big NOT NULL, decided_by $big NULL, decided_at $big NULL)$opt",
         ],

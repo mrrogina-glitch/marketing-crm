@@ -769,7 +769,7 @@ function user_name_of($id): string
 /** Opis promjena između starog zapisa klijenta i novih vrijednosti. */
 function client_diff(array $old, array $new): string
 {
-    $labels = ['kind' => 'Vrsta', 'name' => 'Naziv', 'contact' => 'Kontakt osoba', 'oib' => 'OIB', 'email' => 'E-mail', 'phone' => 'Telefon', 'service' => 'Usluga',
+    $labels = ['kind' => 'Vrsta', 'name' => 'Naziv', 'contact' => 'Kontakt osoba', 'oib' => 'OIB', 'email' => 'E-mail', 'phone' => 'Telefon', 'service' => 'Usluga', 'industry' => 'Djelatnost',
         'value' => 'Procijenjena vrijednost', 'owner_id' => 'Prodavač', 'next_follow_up' => 'Sljedeći kontakt',
         'camp_active' => 'Aktivna kampanja', 'camp_start' => 'Kampanja od', 'camp_end' => 'Kampanja do', 'camp_value' => 'Vrijednost kampanje'];
     $parts = [];
