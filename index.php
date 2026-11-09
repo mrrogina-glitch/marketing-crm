@@ -95,7 +95,7 @@ $v = static function (string $f): string {
     <div class="toolbar toolbar-inbox">
       <label class="f">Pretraga<input id="iq" type="search" placeholder="Pošiljatelj, predmet, tekst" autocomplete="off"></label>
       <label class="f">Prikaz<select id="iFilter">
-        <option value="all">Sve poruke (Inbox 1 i Inbox 2)</option>
+        <option value="all">Sve primljene poruke (Inbox 1 i Inbox 2)</option>
         <option value="unread">Nepročitano</option>
         <option value="in">Primljeno</option>
         <option value="out">Poslano</option>
