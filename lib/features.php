@@ -110,15 +110,15 @@ function safe_filename(string $name): string
     return $name !== '' ? $name : 'datoteka';
 }
 
-function store_document(?int $clientId, ?int $emailId, string $name, string $mime, string $data, ?int $userId): int
+function store_document(?int $clientId, ?int $emailId, string $name, string $mime, string $data, ?int $userId, int $isContract = 0): int
 {
     $stored = bin2hex(random_bytes(16));
     if (@file_put_contents(storage_dir() . '/' . $stored, $data, LOCK_EX) === false) {
         throw new ApiError('Spremanje datoteke nije uspjelo.', 500);
     }
     $mime = preg_match('#^[\w.+-]+/[\w.+-]+$#', $mime) ? mb_substr($mime, 0, 120) : 'application/octet-stream';
-    run('INSERT INTO documents (client_id, email_id, filename, mime, size, stored, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [$clientId, $emailId, safe_filename($name), $mime, strlen($data), $stored, $userId, ms()]);
+    run('INSERT INTO documents (client_id, email_id, filename, mime, size, stored, uploaded_by, created_at, is_contract) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$clientId, $emailId, safe_filename($name), $mime, strlen($data), $stored, $userId, ms(), $isContract]);
     return insert_id();
 }
 
@@ -132,6 +132,7 @@ function doc_out(array $r): array
         'size' => (int) $r['size'],
         'by' => $r['uploaded_by'] !== null ? (string) $r['uploaded_by'] : null,
         'createdAt' => (int) $r['created_at'],
+        'contract' => (int) ($r['is_contract'] ?? 0) === 1,
     ];
 }
 
@@ -771,7 +772,7 @@ function client_diff(array $old, array $new): string
 {
     $labels = ['kind' => 'Vrsta', 'name' => 'Naziv', 'contact' => 'Kontakt osoba', 'oib' => 'OIB', 'email' => 'E-mail', 'phone' => 'Telefon', 'service' => 'Usluga', 'industry' => 'Djelatnost',
         'value' => 'Procijenjena vrijednost', 'owner_id' => 'Prodavač', 'next_follow_up' => 'Sljedeći kontakt',
-        'camp_active' => 'Aktivna kampanja', 'camp_start' => 'Kampanja od', 'camp_end' => 'Kampanja do', 'camp_value' => 'Vrijednost kampanje'];
+        'has_contract' => 'Ugovor', 'contract_end' => 'Ugovor vrijedi do', 'camp_active' => 'Aktivna kampanja', 'camp_start' => 'Kampanja od', 'camp_end' => 'Kampanja do', 'camp_value' => 'Vrijednost kampanje'];
     $parts = [];
     foreach ($labels as $k => $label) {
         if (!array_key_exists($k, $new)) {
@@ -782,7 +783,7 @@ function client_diff(array $old, array $new): string
         if (in_array($k, ['value', 'camp_value'], true)) {
             $o = (float) $o;
             $n = (float) $n;
-        } elseif ($k === 'camp_active') {
+        } elseif ($k === 'camp_active' || $k === 'has_contract') {
             $o = (int) $o;
             $n = (int) $n;
         } else {
@@ -796,7 +797,7 @@ function client_diff(array $old, array $new): string
             if ($k === 'owner_id') {
                 return user_name_of($v);
             }
-            if ($k === 'camp_active') {
+            if ($k === 'camp_active' || $k === 'has_contract') {
                 return $v ? 'da' : 'ne';
             }
             if (in_array($k, ['value', 'camp_value'], true)) {

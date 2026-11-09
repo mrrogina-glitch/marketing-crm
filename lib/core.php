@@ -267,6 +267,11 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        20 => [
+            "ALTER TABLE clients ADD has_contract TINYINT NOT NULL DEFAULT 0",
+            "ALTER TABLE clients ADD contract_end DATE NULL",
+            "ALTER TABLE documents ADD is_contract TINYINT NOT NULL DEFAULT 0",
+        ],
         19 => [
             "ALTER TABLE clients ADD next_follow_time VARCHAR(5) NULL",
         ],
