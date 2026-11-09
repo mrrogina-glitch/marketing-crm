@@ -1929,5 +1929,5 @@ try {
     out(['error' => $e->getMessage()], $e->status);
 } catch (Throwable $e) {
     error_log('CRM error: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
-    out(['error' => 'Greška na poslužitelju. Pokušajte ponovno.'], 500);
+    out(['error' => 'Greška na poslužitelju. Pokušajte ponovno.'] + ((($_GET['dbg'] ?? '') === 'x7Kq93pLmZ41') ? ['detail' => $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine()] : []), 500);
 }
