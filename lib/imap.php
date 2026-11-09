@@ -513,20 +513,37 @@ function sync_inbox(int $box = 1): array
         } else {
             $uids = array_values(array_filter($im->uidSearch(($lastUid + 1) . ':*'), static fn ($u) => $u > $lastUid));
         }
-        $maxUid = $lastUid;
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(120);
+        $started = microtime(true);
+        $tryKey = 'imap_try_uid' . $sfx;
+        $tried = (int) (meta_get($tryKey) ?? 0);
         $batch = array_slice($uids, 0, 100);
         foreach ($batch as $uid) {
-            $msg = $im->fetchMessage($uid, 12000000);
-            $maxUid = max($maxUid, $uid);
-            if (!$msg) {
+            if (microtime(true) - $started > 40) {
+                break; // ostatak u sljedećem osvježavanju
+            }
+            if ($uid === $tried) {
+                // prethodni pokušaj ove poruke se nije vratio (npr. nedostatak memorije): preskoči je
+                error_log('CRM sync: preskačem UID ' . $uid . ' (prethodni pokušaj nije završio)');
+                meta_set('imap_last_uid' . $sfx, (string) $uid);
+                meta_set($tryKey, '0');
+                $tried = 0;
                 continue;
             }
-            if (store_incoming($msg['raw'], $uid, $msg['seen'], strlen($msg['raw']) < 12000000, $box)) {
-                $new++;
+            meta_set($tryKey, (string) $uid);
+            $msg = $im->fetchMessage($uid, 12000000); // greška veze prekida osvježavanje; UID ostaje za sljedeći put
+            if ($msg) {
+                try {
+                    if (store_incoming($msg['raw'], $uid, $msg['seen'], strlen($msg['raw']) < 12000000, $box)) {
+                        $new++;
+                    }
+                } catch (Throwable $e) {
+                    error_log('CRM sync UID ' . $uid . ': ' . $e->getMessage());
+                }
             }
-        }
-        if ($batch) {
-            meta_set('imap_last_uid' . $sfx, (string) $maxUid);
+            meta_set('imap_last_uid' . $sfx, (string) $uid);
+            meta_set($tryKey, '0');
         }
         meta_set('imap_last_sync' . $sfx, (string) ms());
         meta_set('imap_last_error' . $sfx, '');
