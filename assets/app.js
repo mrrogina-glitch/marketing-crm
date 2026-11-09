@@ -76,7 +76,7 @@ function initApp() {
     me: { id: '', name: '', email: '', role: 'sales' }, users: [], usersById: {},
     clients: [], campaigns: [], tasks: [], revenue: null, revPeriod: 'weekly', revUser: '', audit: null, notes: [], emails: [], docs: [], templates: [], scheduled: [], reminders: [], settings: null, mail: { enabled: false, from: '', imap: false, lastSync: 0, error: '', imap2: false, lastSync2: 0, error2: '', imap2Cfg: null },
     byClient: new Map(), clientsById: new Map(), inByClient: new Map(),
-    tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', fIndustry: '', sort: 'activity', iq: '', iFilter: 'all', period: '7',
+    tab: 'pregled', q: '', fStatus: '', fOwner: '', fKind: '', fIndustry: '', fVK: '', fVMin: '', fVMax: '', fNotes: true, sort: 'activity', iq: '', iFilter: 'all', period: '7',
     openId: null, pendingStatus: null, mailClient: null, mailDocs: new Set(), nFromMail: null, nGuess: '', reportText: '', openMailId: null, lastFocus: null, refreshing: false, syncing: false,
   };
 
@@ -230,6 +230,7 @@ function initApp() {
     const n = unreadCount(); const b = $('inboxBadge');
     b.hidden = n === 0; b.textContent = n > 99 ? '99+' : String(n);
     $('meName').textContent = S.me.name || '';
+    if ($('bkTop')) $('bkTop').hidden = !isAdmin();
   }
   function renderAll() {
     renderBanner(); renderTabs();
@@ -270,6 +271,7 @@ function initApp() {
   const taskForm = (p, cid) => '<div class="tkform"><input id="' + p + 'Title" placeholder="Novi zadatak, npr. poslati ponudu" maxlength="300" aria-label="Zadatak">' +
     '<input id="' + p + 'Due" type="date" value="' + tomorrow() + '" aria-label="Rok">' +
     (cid ? '' : '<input id="' + p + 'Client" list="tkClients" placeholder="Klijent (nije obavezno)" aria-label="Klijent"><datalist id="tkClients">' + S.clients.map((c) => '<option value="' + esc(c.name) + '"></option>').join('') + '</datalist>') +
+    '<select id="' + p + 'Rep" aria-label="Ponavljanje"><option value="">Ne ponavlja se</option><option value="dnevno">Ponavlja svaki dan</option><option value="tjedno">Ponavlja svaki tjedan</option><option value="mjesecno">Ponavlja svaki mjesec</option></select>' +
     (!cid ? '<select id="' + p + 'Who" aria-label="Izvršitelj">' + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === S.me.id ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>' : '') +
     '<button class="btn primary sm" data-act="taskadd" data-p="' + p + '"' + (cid ? ' data-cid="' + esc(cid) + '"' : '') + '>Dodaj zadatak</button></div>';
   function tasksPanel() {
@@ -293,7 +295,7 @@ function initApp() {
     }
     const who = $(p + 'Who') ? $(p + 'Who').value : '';
     const descr = $(p + 'Descr') ? $(p + 'Descr').value.trim() : '';
-    const ok = await safe(() => call('task_create', { title, descr, due, client_id: cid || undefined, assignee_id: who || undefined }), 'Zadatak dodan');
+    const ok = await safe(() => call('task_create', { title, descr, due, client_id: cid || undefined, assignee_id: who || undefined, repeat: $(p + 'Rep') ? $(p + 'Rep').value : '' }), 'Zadatak dodan');
     if (ok) { $(p + 'Title').value = ''; if ($(p + 'Descr')) $(p + 'Descr').value = ''; if ($(p + 'Client')) $(p + 'Client').value = ''; await refresh(true); if (p === 'tz') { document.activeElement && document.activeElement.blur(); renderTasksTab(); } }
   }
   async function taskAct(btn) {
@@ -336,6 +338,7 @@ function initApp() {
       '<textarea id="tzDescr" rows="2" maxlength="4000" placeholder="Opis (nije obavezno)" aria-label="Opis"></textarea>' +
       '<label class="f inl">Rok<input id="tzDue" type="date" value="' + tomorrow() + '"></label>' +
       '<label class="f inl">Klijent<input id="tzClient" list="tkClients2" placeholder="nije obavezno" autocomplete="off"><datalist id="tkClients2">' + S.clients.map((c) => '<option value="' + esc(c.name) + '"></option>').join('') + '</datalist></label>' +
+      '<label class="f inl">Ponavljanje<select id="tzRep"><option value="">Ne ponavlja se</option><option value="dnevno">Svaki dan</option><option value="tjedno">Svaki tjedan</option><option value="mjesecno">Svaki mjesec</option></select></label>' +
       '<label class="f inl">Izvršitelj<select id="tzWho">' + ownerOptions().map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === S.me.id ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select></label>' +
       '<button class="btn primary" data-act="taskadd" data-p="tz">Dodaj zadatak</button></div></section>' +
       '<section class="panel-b"><header><h3>' + (isAdmin() ? 'Svi zadaci' : 'Moji zadaci') + '</h3><span class="muted">' + a.length + ' prikazano</span></header>' +
@@ -361,9 +364,10 @@ function initApp() {
     const notes = t.notes.length ? '<ul class="tknotes">' + t.notes.map((n) => '<li class="' + n.kind + '"><small>' + esc(fmtDT(n.at)) + ' · ' + esc(person(n.userId)) + (n.kind === 'close' ? ' · završna bilješka' : '') + '</small><div>' + esc(n.body).replace(/\n/g, '<br>') + '</div></li>').join('') + '</ul>' : '<p class="muted">Još nema bilješki.</p>';
     const can = { take: !t.takenAt && !t.doneAt, del: isAdmin() || t.createdBy === S.me.id };
     toolModal('Zadatak', '<div class="tkhead"><h3>' + esc(t.title) + '</h3>' + tkPill(t) + '</div>' +
-      '<p class="hint">Izvršitelj: <b>' + esc(person(t.assigneeId)) + '</b> · Rok: <b>' + esc(fmtYmd(t.due)) + '</b>' + (c ? ' · Klijent: <button class="lnk" data-act="tk_client" data-id="' + esc(c.id) + '">' + esc(c.name) + '</button>' : '') + '</p>' +
+      '<p class="hint">Izvršitelj: <b>' + esc(person(t.assigneeId)) + '</b> · Rok: <b>' + esc(fmtYmd(t.due)) + '</b>' + (t.repeat ? ' · <b>ponavlja se ' + ({ dnevno: 'svaki dan', tjedno: 'svaki tjedan', mjesecno: 'svaki mjesec' }[t.repeat] || '') + '</b>' : '') + (c ? ' · Klijent: <button class="lnk" data-act="tk_client" data-id="' + esc(c.id) + '">' + esc(c.name) + '</button>' : '') + '</p>' +
       (t.descr ? '<p class="tkdescr">' + esc(t.descr).replace(/\n/g, '<br>') + '</p>' : '') + tl +
       '<h4>Bilješke</h4>' + notes +
+      (t.doneAt ? '' : '<div class="tkassign"><label class="f inl">Dodijeli drugom korisniku<select id="tkAssignTo">' + S.users.filter((u) => u.active && u.id !== t.assigneeId).map((u) => '<option value="' + esc(u.id) + '">' + esc(u.name) + '</option>').join('') + '</select></label><button class="btn sm" data-act="tk_assign" data-id="' + esc(t.id) + '">Dodijeli</button></div>') +
       (t.doneAt ? '' : '<label class="f">Nova bilješka' + '<textarea id="tkNote" rows="3" maxlength="5000" placeholder="Što je napravljeno, dogovor s klijentom…"></textarea></label>') +
       '<div class="acts">' + (t.doneAt ? '<button class="btn" data-act="tk_reopen" data-id="' + esc(t.id) + '">Vrati u otvoreno</button>' :
         (can.take ? '<button class="btn primary" data-act="tk_take" data-id="' + esc(t.id) + '">Preuzmi zadatak</button>' : '') +
@@ -375,6 +379,7 @@ function initApp() {
   async function taskDetailAct(act, a) {
     const id = a.dataset.id; const note = $('tkNote') ? $('tkNote').value.trim() : '';
     if (act === 'tk_client') { toolClose(); openClient(id); return; }
+    if (act === 'tk_assign') { const to = $('tkAssignTo') && $('tkAssignTo').value; if (!to) return; const ok2 = await safe(() => call('task_assign', { id, assignee_id: to }), 'Zadatak dodijeljen'); if (ok2) { await refresh(true); toolClose(); } return; }
     let ok;
     if (act === 'tk_take') ok = await safe(() => call('task_take', { id }), 'Zadatak preuzet');
     else if (act === 'tk_note') { if (note.length < 3) { toast('Upišite bilješku (barem 3 znaka).', true); return; } ok = await safe(() => call('task_note', { id, body: note }), 'Bilješka spremljena'); }
@@ -510,6 +515,29 @@ function initApp() {
     try { const d = await call('audit_list&limit=60&client_id=' + encodeURIComponent(id), null, 'GET'); const el = $('dAudit'); if (el && S.openId === id) el.innerHTML = d.entries.length ? d.entries.map((e) => auditLi(e, false)).join('') : '<li class="muted">Nema zapisa.</li>'; } catch (e) { S.auditFor = ''; }
   }
 
+  /* lijevak Pregovori -> Ugovoreno */
+  async function loadPipeline(force) {
+    if (S.plBusy || (!force && S.pipeline && Date.now() - S.plAt < 30000)) return;
+    S.plBusy = true;
+    try { S.pipeline = await call('pipeline', null, 'GET'); S.plAt = Date.now(); if (S.tab === 'pregled') renderPipeline(); } catch (e) { /* ignore */ } finally { S.plBusy = false; }
+  }
+  function renderPipeline() {
+    const el = $('plPanel'); if (!el) return;
+    const P = S.pipeline;
+    if (!P) { el.innerHTML = '<header><h3>Lijevak: Pregovori → Ugovoreno</h3></header><p class="muted pad">Učitavanje…</p>'; return; }
+    const n = P.negotiating, c = P.contracted; const tot = (n.value + c.value) || 1;
+    let h = '<header><h3>Lijevak: Pregovori → Ugovoreno</h3><span class="muted">' + (P.scope === 'all' ? 'svi prodavači' : 'vaši klijenti') + ' · vrijednosti klijenata</span></header><div class="pad">' +
+      '<div class="funnel"><div class="fn neg" style="--w:' + Math.max(18, Math.round(n.value * 100 / tot)) + '%"><span>Pregovori</span><b>' + eur(n.value) + '</b><small>' + n.count + ' ' + plural(n.count, 'klijent', 'klijenata') + ' · u prosjeku ' + n.avgAgeDays + ' dana u pregovorima</small></div>' +
+      '<div class="fn arrow" aria-hidden="true">↓ ' + esc(String(P.conversionCount)).replace('.', ',') + '% klijenata · ' + esc(String(P.conversionValue)).replace('.', ',') + '% vrijednosti</div>' +
+      '<div class="fn con" style="--w:' + Math.max(18, Math.round(c.value * 100 / tot)) + '%"><span>Ugovoreno</span><b>' + eur(c.value) + '</b><small>' + c.count + ' ' + plural(c.count, 'klijent', 'klijenata') + (c.avgDaysToContract ? ' · od pregovora do ugovora prosječno ' + c.avgDaysToContract + ' dana' : '') + '</small></div></div>';
+    if (P.scope === 'all') {
+      const ids = Object.keys(P.byOwner);
+      if (ids.length) h += '<div class="tblwrap"><table class="rev"><thead><tr><th>Prodavač</th><th>Pregovori (kom.)</th><th>Pregovori (€)</th><th>Ugovoreno (kom.)</th><th>Ugovoreno (€)</th></tr></thead><tbody>' +
+        ids.map((id) => { const o = P.byOwner[id]; return '<tr><td class="l">' + esc(person(id)) + '</td><td>' + o.neg.n + '</td><td>' + eur(o.neg.v) + '</td><td>' + o.con.n + '</td><td>' + eur(o.con.v) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    }
+    if (P.recent.length) h += '<h4 style="margin:14px 0 6px">Zadnji ugovoreni</h4><ul class="list">' + P.recent.map((r) => '<li><button class="li" data-open="' + esc(r.id) + '"><span class="a"><b>' + esc(r.name) + '</b><small>' + eur(r.value) + ' · ' + (P.scope === 'all' ? esc(person(r.owner)) + ' · ' : '') + 'ugovoreno ' + esc(fmtDate(r.at)) + '</small></span><span class="b">' + r.days + ' ' + plural(r.days, 'dan', 'dana') + '</span></button></li>').join('') + '</ul>';
+    el.innerHTML = h + '<p class="muted small">Trajanje se računa od prve bilješke s vrijednošću u pregovorima do prve bilješke s ugovorenom vrijednošću.</p></div>';
+  }
   function renderOverview() {
     const root = $('v-pregled');
     if (!S.loaded) { root.innerHTML = loadingHtml(); return; }
@@ -549,16 +577,16 @@ function initApp() {
     h += stale.length ? '<ul class="list">' + stale.slice(0, 8).map((c) => { const t = lastTs(c); return rowLi(c, t ? 'zadnje ' + rel(t) : 'nema bilješki', 'stale'); }).join('') + '</ul>' : '<div class="none">Svi otvoreni klijenti imaju svježu bilješku.</div>';
     h += '</section></div>';
     const tot = S.clients.length;
-    if (!isAdmin()) { root.innerHTML = h + '<section class="panel-b">' + pipeStats() + '</section>'; return; }
+    if (!isAdmin()) { root.innerHTML = h + '<section class="panel-b" id="plPanel"></section><section class="panel-b">' + pipeStats() + '</section>'; renderPipeline(); loadPipeline(); return; }
     h += '<section class="panel-b"><header><h3>Tijek prodaje</h3><span class="muted nums">' + tot + ' ' + plural(tot, 'klijent', 'klijenata') + '</span></header><div class="pipe"><div class="pipe-bar" role="img" aria-label="Raspodjela klijenata po statusu">' +
       STAGES.map((s) => { const n = S.clients.filter((c) => c.status === s.id).length; return n ? '<i style="flex:' + n + ';background:var(--s-' + s.id + ')" title="' + esc(s.label) + ': ' + n + '"></i>' : ''; }).join('') +
       '</div><div class="pipe-leg">' +
       STAGES.map((s) => { const a = S.clients.filter((c) => c.status === s.id); return '<div><span class="nm" style="--dot:var(--s-' + s.id + ')"><i></i>' + esc(s.label) + '</span><b>' + a.length + '</b><small class="nums">' + eur(sumVal(a)) + '</small></div>'; }).join('') +
       '</div></div>' + pipeStats() + '</section>';
-    h += '<section class="panel-b" id="revPanel"></section>';
+    h += '<section class="panel-b" id="plPanel"></section><section class="panel-b" id="revPanel"></section>';
     if (isAdmin()) h += '<section class="panel-b" id="usagePanel"></section>';
     root.innerHTML = h;
-    renderRevenue(); loadRevenue(); renderGoals(); loadGoals();
+    renderPipeline(); loadPipeline(); renderRevenue(); loadRevenue(); renderGoals(); loadGoals();
     if (isAdmin()) { renderUsage(); loadUsage(); }
   }
 
@@ -589,8 +617,16 @@ function initApp() {
 
   function campLi(c) {
     const short = campShort(c);
-    return '<li class="' + (short ? 'short' : '') + '"><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + (short ? ' <span class="chip short">' + esc(lenTxt(c)) + '</span>' : '') + '</b><small>' + esc((c.service ? c.service + ' · ' : '') + fmtYmd(c.campStart) + ' – ' + fmtYmd(c.campEnd) + (c.campValue ? ' · ' + eur(c.campValue) : '') + ' · ' + person(c.ownerId)) + '</small></span>' +
+    return '<li class="' + (short ? 'short' : '') + '"><button class="li" data-open="' + esc(c.id) + '"><span class="a"><b>' + esc(c.name) + (short ? ' <span class="chip short">' + esc(lenTxt(c)) + '</span>' : '') + '</b><small>' + esc((c.service ? c.service + ' · ' : '') + fmtYmd(c.campStart) + ' – ' + fmtYmd(c.campEnd) + (c.campValue ? ' · ' + (c.campType === 'godisnji' ? 'ugovor ' + eur(c.campValue) + ' (' + eur(c.campValue / (c.campMonths || 12)) + '/mj. × ' + (c.campMonths || 12) + ')' : eur(c.campValue)) : '') + ' · ' + person(c.ownerId)) + '</small></span>' +
       '<span class="b ' + (short ? 'shortc' : (campSoon(c) ? 'soon' : '')) + '">' + esc(leftTxt(c)) + '</span></button></li>';
+  }
+  /* prihod ovaj mjesec u odnosu na prošli (iz izvještaja prihoda; prodavač vidi svoje) */
+  function monthCmpHtml() {
+    const R = S.revenue; if (!R) { loadRevenue(); return '<div><div class="k">Ovaj mjesec</div><div class="v">…</div><div class="s">učitavanje</div></div>'; }
+    const d = new Date(); const cur = d.getFullYear() + '-' + pad(d.getMonth() + 1); const pv = new Date(d.getFullYear(), d.getMonth() - 1, 1); const prev = pv.getFullYear() + '-' + pad(pv.getMonth() + 1);
+    const sum = (k) => (R.monthly || []).filter((x) => x.p === k).reduce((t, x) => t + x.v, 0);
+    const a = sum(cur), b = sum(prev); const diff = a - b; const pct = b > 0 ? Math.round(diff * 100 / b) : null;
+    return '<div><div class="k">Prihod ovaj mjesec</div><div class="v">' + eur(a) + '</div><div class="s">' + (b > 0 || a > 0 ? 'prošli mjesec ' + eur(b) + (pct !== null ? ' · <b class="' + (diff >= 0 ? 'up' : 'down') + '">' + (diff >= 0 ? '▲ +' : '▼ ') + pct + '%</b>' : '') : 'nema podataka') + '</div></div>';
   }
   function renderActive() {
     const root = $('v-aktivni');
@@ -602,7 +638,8 @@ function initApp() {
       '<div class="strip"><div><div class="k">Aktivne kampanje</div><div class="v">' + act.length + '</div><div class="s">trenutno traju</div></div>' +
       '<div><div class="k">Istječu za 7 dana</div><div class="v' + (soonN ? ' warn' : '') + '">' + soonN + '</div><div class="s">uključujući danas</div></div>' +
       '<div><div class="k">Kraće od 7 dana</div><div class="v">' + shortN + '</div><div class="s">dnevne i kratke (ljubičasto)</div></div>' +
-      '<div><div class="k">Vrijednost kampanja</div><div class="v">' + eur(act.reduce((t, c) => t + (c.campValue || 0), 0)) + '</div><div class="s">aktivne kampanje</div></div></div>';
+      '<div><div class="k">Vrijednost kampanja</div><div class="v">' + eur(act.reduce((t, c) => t + (c.campValue || 0), 0)) + '</div><div class="s">aktivne kampanje i ugovori (ukupno)</div></div>' +
+      '<div><div class="k">Mjesečni iznos ugovora</div><div class="v">' + eur(act.filter((c) => c.campType === 'godisnji').reduce((t, c) => t + (c.campValue || 0) / (c.campMonths || 12), 0)) + '</div><div class="s">zbroj mjesečnih iznosa aktivnih ugovora</div></div>' + monthCmpHtml() + '</div>';
     h += '<section class="panel-b"><header><h3>Aktivne kampanje</h3><span class="muted">po datumu završetka</span></header>' +
       (act.length ? '<ul class="list">' + act.map((c) => campLi(c)).join('') + '</ul>' : '<div class="none">Nema aktivnih kampanja. U kartici klijenta označite "Aktivni" i odaberite datum do kada kampanja traje.</div>') + '</section>';
     if (gone.length) h += '<section class="panel-b"><header><h3>Istekle kampanje</h3><span class="muted">završile su; otvorite klijenta i upišite novu kampanju (termin i vrijednost)</span></header><ul class="list">' +
@@ -631,7 +668,10 @@ function initApp() {
   }
   function filteredClients() {
     let a = S.clients.slice(); const q = S.q.trim().toLowerCase();
-    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.email2, c.phone, c.service, c.oib, c.industry, c.address].some((v) => (v || '').toLowerCase().includes(q)));
+    if (q) a = a.filter((c) => [c.name, c.contact, c.email, c.email2, c.phone, c.service, c.oib, c.industry, c.address].some((v) => (v || '').toLowerCase().includes(q)) || (S.fNotes && (S.byClient.get(c.id) || []).some((n) => (n.text || '').toLowerCase().includes(q))));
+    if (S.fVK) a = a.filter((c) => (S.fVK === 'none' ? !c.value : (c.value > 0 && (c.valueKind === 'ugovoreno' ? 'ugovoreno' : 'ponudeno') === S.fVK)));
+    if (S.fVMin !== '') a = a.filter((c) => (c.value || 0) >= Number(S.fVMin));
+    if (S.fVMax !== '') a = a.filter((c) => (c.value || 0) <= Number(S.fVMax));
     if (S.fStatus) a = a.filter((c) => c.status === S.fStatus);
     if (S.fOwner) a = a.filter((c) => c.ownerId === S.fOwner);
     if (S.fKind) a = a.filter((c) => (c.kind || 'tvrtka') === S.fKind);
@@ -758,11 +798,27 @@ function initApp() {
     h += '</div><div class="sec"><h3>Poruka</h3><div class="mailbody">' + esc(e.body) + '</div><div class="acts" style="margin-top:10px"><button class="btn sm danger" data-act="maildel" data-id="' + esc(e.id) + '">Obriši poruku</button><span class="hint">Briše poruku iz aplikacije (ne i sa poslužitelja e-pošte).</span></div></div>';
     {
       const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
-      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose">' + replyTplSelect() + '<textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="rattach"><label class="btn sm filebtn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9-9a3.7 3.7 0 015.2 5.2l-9 9a1.8 1.8 0 01-2.6-2.6l8.4-8.4"/></svg> Dodaj privitak<input type="file" id="rFile" multiple hidden></label><span class="hint">najviše 10 datoteka, ukupno 15 MB</span></div><ul class="rfiles" id="rFiles"></ul><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
+      h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose">' + replyQuick() + replyTplSelect() + '<textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="rattach"><label class="btn sm filebtn"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5.5 5.5 0 01-7.8-7.8l9-9a3.7 3.7 0 015.2 5.2l-9 9a1.8 1.8 0 01-2.6-2.6l8.4-8.4"/></svg> Dodaj privitak<input type="file" id="rFile" multiple hidden></label><span class="hint">najviše 10 datoteka, ukupno 15 MB</span></div><ul class="rfiles" id="rFiles"></ul><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
+        '<div class="rsavetpl"><button class="btn sm" data-act="rtplshow" type="button">★ Spremi kao predložak</button><span id="rTplRow" hidden><input id="rTplName" maxlength="120" placeholder="Naziv predloška"> <button class="btn sm primary" data-act="rtplsave" type="button">Spremi</button></span></div>' +
         '<p class="hint">Odgovor odlazi s adrese ' + esc(e.box === 2 && S.mail.from2 ? S.mail.from2 : S.mail.from) + ' (sandučić na koji je poruka stigla) na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
     }
     h += '</div>';
     sh.innerHTML = h;
+  }
+  /* brzi odgovori: jedan klik ubacuje gotov tekst */
+  function replyQuick() {
+    const tpls = S.templates.filter((t) => t.kind !== 'akcija').slice(0, 8);
+    if (!tpls.length) return '';
+    return '<div class="quick" role="group" aria-label="Brzi odgovori"><span class="muted small">Brzi odgovori:</span>' + tpls.map((t) => '<button class="chipbtn" type="button" data-act="rquick" data-id="' + esc(t.id) + '" title="' + esc(t.subject) + '">⚡ ' + esc(t.name) + '</button>').join('') + '</div>';
+  }
+  function replyInsert(id) { const sel = $('rTpl'); if (sel) { sel.value = id; } else { return; } replyApplyTpl(); }
+  async function replySaveTpl() {
+    const ta = $('rBody'); const body = ta ? ta.value.trim() : ''; const name = $('rTplName') ? $('rTplName').value.trim() : '';
+    if (body.length < 10) { toast('Najprije upišite tekst odgovora koji želite spremiti.', true); return; }
+    if (name.length < 2) { toast('Upišite naziv predloška.', true); $('rTplName').focus(); return; }
+    const e = S.emails.find((x) => x.id === S.openMailId) || {};
+    const ok = await safe(() => call('template_quick', { name, body, subject: e.subject ? 'Re: ' + e.subject.replace(/^(re:\s*)+/i, '') : '' }), 'Predložak spremljen');
+    if (ok) { $('rTplRow').hidden = true; $('rTplName').value = ''; await refresh(true); }
   }
   function replyTplSelect() {
     const tpls = S.templates.filter((t) => t.kind !== 'akcija');
@@ -859,7 +915,7 @@ function initApp() {
 
   /* ---------- obavijesti, sigurnost, ne kontaktirati, duplikati, uvoz ---------- */
   const dncHas = (e) => !!e && (S.dnc || []).includes(String(e).toLowerCase());
-  const ALERT_ICON = { task: '📋', camp_end: '🔔', camp_soon: '⏳', security: '🛡️', unsub: '✉️' };
+  const ALERT_ICON = { task: '📋', camp_end: '🔔', camp_soon: '⏳', neg_stale: '⏰', security: '🛡️', unsub: '✉️' };
   function alertsPanel() {
     const al = S.alerts || [];
     if (!al.length) return '';
@@ -868,7 +924,7 @@ function initApp() {
       return '<li class="alrow"><div class="a"><b>' + (ALERT_ICON[a.kind] || '⏰') + ' ' + esc(a.title) + '</b><small>' + esc(a.body).replace(/\n/g, '<br>') + '</small></div><span class="acts">' +
         (c ? '<button class="btn sm" data-open="' + esc(c.id) + '">Otvori klijenta</button>' : '') +
         (a.kind === 'camp_end' && a.data ? '<button class="btn sm primary" data-act="alrenew" data-id="' + esc(a.id) + '">Obnovi kampanju</button>' : '') +
-        (a.kind === 'camp_soon' && a.data ? '<button class="btn sm primary" data-act="alextend" data-id="' + esc(a.id) + '">Produži do ' + esc(fmtYmd(a.data.newEnd)) + '</button>' : '') +
+        (a.kind === 'camp_soon' && a.data ? '<button class="btn sm primary" data-act="alextend" data-id="' + esc(a.id) + '">Produži</button>' : '') +
         (a.kind === 'security' && isAdmin() ? '<button class="btn sm" data-goto="postavke">Sigurnost</button>' : '') +
         '<button class="btn sm" data-act="aldone" data-id="' + esc(a.id) + '">Riješeno</button></span></li>';
     }).join('') + '</ul></section>';
@@ -877,10 +933,34 @@ function initApp() {
     const ok = await safe(() => call('alert_done', { id }));
     if (ok) { S.alerts = (S.alerts || []).filter((a) => a.id !== id); renderOverview(); }
   }
-  async function alertExtend(id) {
+  /* Produži: obrazac je unaprijed popunjen (isti tip, mjesečni iznos i broj mjeseci), prodavač može sve izmijeniti */
+  function alertExtend(id) {
     const a = (S.alerts || []).find((x) => x.id === id); if (!a || !a.data) return;
-    const ok = await safe(() => call('campaign_extend', { client_id: a.clientId, end: a.data.newEnd }), 'Kampanja produljena');
-    if (ok) { S.alerts = (S.alerts || []).filter((x) => x.id !== id); await refresh(true); renderOverview(); }
+    const d = a.data; const c = byId(a.clientId) || {};
+    const g = d.type === 'godisnji';
+    S.prolong = { id, cid: a.clientId };
+    toolModal('Produži: ' + (c.name || ''), '<div class="grid2">' +
+      '<label class="f wide">Vrsta<select id="plType"><option value="jednokratno"' + (g ? '' : ' selected') + '>Kampanja (jednokratni iznos)</option><option value="godisnji"' + (g ? ' selected' : '') + '>Ugovor (mjesečni iznos × broj mjeseci)</option></select></label>' +
+      '<label class="f">Početak<input id="plStart" type="date" value="' + esc(d.start) + '"></label>' +
+      '<label class="f" id="plMLab"' + (g ? '' : ' hidden') + '>Broj mjeseci (1–12)<select id="plMonths">' + [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((k) => '<option value="' + k + '"' + (k === (d.months || 12) ? ' selected' : '') + '>' + k + '</option>').join('') + '</select></label>' +
+      '<label class="f"><span id="plAmtLab">' + (g ? 'Mjesečni iznos (€)' : 'Vrijednost (€)') + '</span><input id="plAmt" type="number" min="0" step="0.01" value="' + esc(g ? d.monthly : d.value) + '"></label>' +
+      '<label class="f">Završetak<input id="plEnd" type="date" value="' + esc(d.end) + '"></label>' +
+      '<label class="f" id="plTLab"' + (g ? '' : ' hidden') + '>Vrijednost ugovora (€)<input id="plTot" readonly tabindex="-1"></label></div>' +
+      '<div class="msg" id="plMsg" role="alert"></div><div class="row-btns"><button class="btn" data-act="plcancel">Odustani</button><button class="btn primary" data-act="plsave">Spremi produljenje</button></div>');
+    plSync(false);
+  }
+  function plSync(setEnd) {
+    const g = $('plType').value === 'godisnji'; const mo = Number($('plMonths').value) || 12; const amt = Number($('plAmt').value) || 0;
+    $('plMLab').hidden = !g; $('plTLab').hidden = !g; $('plAmtLab').textContent = g ? 'Mjesečni iznos (€)' : 'Vrijednost (€)';
+    $('plTot').value = g ? eur(amt * mo) : '';
+    if (g && setEnd && $('plStart').value) { const dd = new Date($('plStart').value + 'T12:00:00'); dd.setMonth(dd.getMonth() + mo); dd.setDate(dd.getDate() - 1); $('plEnd').value = ymd(dd); }
+  }
+  async function plSave() {
+    const g = $('plType').value === 'godisnji'; const mo = g ? (Number($('plMonths').value) || 12) : 12; const amt = Number($('plAmt').value) || 0;
+    if (!(amt > 0)) { $('plMsg').textContent = 'Upišite ' + (g ? 'mjesečni iznos' : 'vrijednost') + ' (€).'; return; }
+    const total = Math.round(amt * (g ? mo : 1) * 100) / 100;
+    const ok = await safe(() => call('campaign_renew', { client_id: S.prolong.cid, start: $('plStart').value, end: $('plEnd').value, value: total, months: mo, type: $('plType').value }), 'Produljenje upisano');
+    if (ok) { await safe(() => call('alert_done', { id: S.prolong.id })); S.alerts = (S.alerts || []).filter((x) => x.id !== S.prolong.id); toolClose(); await refresh(true); renderOverview(); } else { $('plMsg').textContent = 'Spremanje nije uspjelo.'; }
   }
   async function alertRenew(id) {
     const a = (S.alerts || []).find((x) => x.id === id); if (!a || !a.data) return;
@@ -1047,9 +1127,33 @@ function initApp() {
         '<div class="acts"><button class="btn sm" data-tool="poolpage" data-p="' + (d.page - 1) + '"' + (d.page <= 1 ? ' disabled' : '') + '>← Prethodna</button><button class="btn sm" data-tool="poolpage" data-p="' + (d.page + 1) + '"' + (d.page >= pages ? ' disabled' : '') + '>Sljedeća →</button></div>';
     } catch (e) { box.innerHTML = '<p class="msg">' + esc(e.message) + '</p>'; }
   }
+  /* kampanja "povratak" za arhivu izgubljenih: segment po gradu / djelatnosti */
+  async function poolCampInit() {
+    const el = $('poolCamp'); if (!el) return;
+    el.innerHTML = '<p class="muted">Učitavanje segmenata…</p>';
+    let d; try { d = await call('pool_segments', null, 'GET'); } catch (e) { el.innerHTML = '<p class="msg">' + esc(e.message) + '</p>'; return; }
+    S.poolSeg = d;
+    el.innerHTML = '<h4 style="margin:18px 0 6px">Kampanja „Povratak"</h4><p class="hint">Šalje se izgubljenim klijentima iz arhive s ispravnom e-mail adresom (' + d.total.toLocaleString('hr-HR') + '). Poruke idu kroz red slanja: 09–15 h najviše 30 na sat, 16–08 h najviše 55 na sat, a pojedinačni e-mailovi imaju prednost. Isti klijent ne dobiva istu poruku (isti predmet) češće od jednom u 30 dana.</p>' +
+      '<div class="grid2"><label class="f">Grad<select id="pcCity"><option value="">Svi gradovi</option>' + d.cities.map((c) => '<option value="' + esc(c.name) + '">' + esc(c.name) + ' (' + c.count.toLocaleString('hr-HR') + ')</option>').join('') + '</select></label>' +
+      '<label class="f">Djelatnost<select id="pcInd"><option value="">Sve djelatnosti</option>' + d.industries.map((c) => '<option value="' + esc(c.name) + '">' + esc(c.name) + ' (' + c.count + ')</option>').join('') + '</select></label>' +
+      '<label class="f">Najviše primatelja (do 1000 po slanju)<input id="pcLimit" type="number" min="1" max="1000" value="200"></label></div>' +
+      '<label class="f">Predmet<input id="pcSubj" maxlength="255" value="Vraćamo se s novom ponudom za {{tvrtka}}"></label>' +
+      '<label class="f">Poruka<textarea id="pcBody" rows="7">Poštovani,\n\nnekada smo surađivali s tvrtkom {{tvrtka}}, a od tada smo proširili ponudu radijskog oglašavanja, PR portala i digitalnih kampanja. Rado bismo Vam predstavili aktualne mogućnosti i posebnu ponudu za povratak.\n\nJavite nam se odgovorom na ovu poruku ili nazovite, pa dogovaramo termin.\n\nLijep pozdrav,\n{{moje_ime}}</textarea></label>' +
+      '<p class="hint" id="pcInfo"></p><div class="msg" id="pcMsg" role="alert"></div><div class="row-btns"><button class="btn" data-tool="pcprev">Pregled primatelja</button><button class="btn primary" data-tool="pcsend">Stavi u red slanja</button></div>';
+  }
+  async function poolCampRun(preview) {
+    const body = { city: $('pcCity').value, industry: $('pcInd').value, limit: Number($('pcLimit').value) || 200, subject: $('pcSubj').value.trim(), body: $('pcBody').value.trim() };
+    if (preview) {
+      try { const r = await call('pool_campaign', Object.assign({ preview: true }, body)); $('pcInfo').innerHTML = 'Primatelja u odabranom segmentu: <b>' + r.count + '</b>.' + (r.samples.length ? '<br>Primjer: <i>' + esc(r.samples[0].subject) + '</i> → ' + esc(r.samples[0].to) : ''); } catch (e) { $('pcMsg').textContent = e.message; }
+      return;
+    }
+    if (!(await confirmBox('Poslati kampanju „Povratak"?', 'Poruke se stavljaju u red slanja (do ' + body.limit + ' primatelja) i šalju se uz ograničenje po satu. Slanje se može otkazati u kartici E-mail kampanje.', 'Da, stavi u red'))) return;
+    try { const r = await call('pool_campaign', body); toast('U red slanja stavljeno: ' + r.queued + (r.skipped ? ' (preskočeno ' + r.skipped + ')' : '')); $('pcMsg').textContent = ''; } catch (e) { $('pcMsg').textContent = e.message; }
+  }
   function poolOpen() {
     toolModal('Arhiva izgubljenih klijenata', '<p class="hint">Izgubljeni klijenti bez prodavača. Otvorite klijenta za uređivanje ili ga preuzmite. Za slanje e-mail kampanje u kartici E-mail kampanje odaberite status Izgubljen.</p>' +
-      '<label class="f">Pretraga<input id="poolQ" type="search" placeholder="Tvrtka, OIB, e-mail, telefon, adresa" value="' + esc(S.poolQ || '') + '"></label><div id="poolRes"></div>');
+      '<label class="f">Pretraga<input id="poolQ" type="search" placeholder="Tvrtka, OIB, e-mail, telefon, adresa" value="' + esc(S.poolQ || '') + '"></label><div id="poolRes"></div>' + (isAdmin() ? '<div id="poolCamp"></div>' : ''));
+    if (isAdmin()) poolCampInit();
     let tm = null; $('poolQ').addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => poolLoad(1), 350); });
     poolLoad(1);
   }
@@ -1066,6 +1170,8 @@ function initApp() {
       else if (t === 'cfno') toolClose();
       else if (t === 'cfyes') { const r = S.cfRes; S.cfRes = null; toolClose(); if (r) r(true); }
       else if (t === 'poolpage') poolLoad(+b.dataset.p);
+      else if (t === 'pcprev') poolCampRun(true);
+      else if (t === 'pcsend') poolCampRun(false);
       else if (t === 'poolopen') { const id = b.dataset.id; toolClose(); ensureClient(id).then((ok) => { if (ok) { renderAll(); openClient(id); } }); }
       return;
     }
@@ -1080,11 +1186,11 @@ function initApp() {
   function bkHtml() {
     const b = S.backups;
     let h = '<header><h3>Sigurnosna kopija (backup)</h3><span class="muted">cijela baza klijenata</span></header><div class="pad">' +
-      '<p class="hint">Kopija se automatski sprema na poslužitelj ako unazad 24 sata nije napravljena. Čuva se zadnjih ' + esc(b ? b.keep : 5) + ' kopija, starije se brišu čim nastane nova. Ručno se može napraviti samo jednom dnevno.</p>';
+      '<p class="hint">Kopija se automatski sprema na poslužitelj ako unazad 24 sata nije napravljena. Čuva se zadnjih ' + esc(b ? b.keep : 5) + ' kopija, starije se brišu čim nastane nova. Preuzmite kopiju na svoje računalo ili drugi disk, jer kopija na istom poslužitelju ne štiti od kvara poslužitelja. Ručno se može napraviti samo jednom dnevno.</p>';
     if (!b) return h + '<p class="muted">Učitavanje…</p></div>';
     h += '<table class="tbl"><thead><tr><th>Datum i vrijeme</th><th>Veličina</th><th></th></tr></thead><tbody>' +
       (b.backups.length ? b.backups.map((x) => '<tr><td>' + esc(new Date(x.at).toLocaleString('hr-HR')) + '</td><td>' + esc(x.size >= 1048576 ? (x.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(x.size / 1024)) + ' KB') + '</td><td><a class="btn" href="api.php?a=backup_download&f=' + encodeURIComponent(x.name) + '">Preuzmi</a></td></tr>').join('') : '<tr><td colspan="3" class="muted">Još nema kopija.</td></tr>') + '</tbody></table>' +
-      '<div class="msg" id="bkMsg" role="alert"></div><div class="row-btns start"><button class="btn primary" data-act="bkrun"' + (b.doneToday ? ' disabled' : '') + '>Napravi kopiju sada</button>' + (b.doneToday ? '<span class="muted">Današnja kopija već postoji.</span>' : '') + '</div></div>';
+      '<div class="msg" id="bkMsg" role="alert"></div><div class="row-btns start"><a class="btn primary" href="api.php?a=backup_latest" download>⬇ Preuzmi najnoviju kopiju</a><button class="btn" data-act="bkrun"' + (b.doneToday ? ' disabled' : '') + '>Napravi kopiju sada</button>' + (b.doneToday ? '<span class="muted">Današnja kopija već postoji.</span>' : '') + '</div></div>';
     return h;
   }
   async function loadBackups() {
@@ -1116,7 +1222,7 @@ function initApp() {
         '<dt>Primanje (IMAP)</dt><dd>' + (S.mail.imap ? 'podešeno, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync)) : 'nije podešeno') + '</dd>' +
         '<dt>Inbox 2 (primanje i slanje)</dt><dd>' + (S.mail.imap2 ? 'podešen, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync2)) + (S.mail.error2 && S.mail.error2 !== 'error' ? ' · greška: ' + esc(S.mail.error2) : '') : 'nije podešen (config.php, odjeljak imap2)') + '</dd>' +
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
-        '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
+        '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' + '<button class="btn" data-act="mailtest2"' + (S.mail.imap2 ? '' : ' disabled') + ' title="Šalje s adrese Inboxa 2">Probni e-mail s Inboxa 2</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
       h += '<section class="panel-b" id="secPanel">' + secHtml() + '</section>';
       h += '<section class="panel-b" id="bkPanel">' + bkHtml() + '</section>';
@@ -1312,9 +1418,9 @@ function initApp() {
     try { await call('user_create', body); toast('Korisnik dodan'); await refresh(true); renderSettings(); }
     catch (e) { m.textContent = e.message; }
   }
-  async function mailTest() {
+  async function mailTest(box) {
     const m = $('mtMsg'); m.textContent = 'Šaljem…';
-    try { const r = await call('mail_test', {}); m.style.color = r.ok ? 'var(--good)' : 'var(--bad)'; m.textContent = r.ok ? 'Probni e-mail poslan na ' + r.to + '.' : 'Slanje nije uspjelo: ' + r.error; }
+    try { const r = await call('mail_test', { box: box || 1 }); m.style.color = r.ok ? 'var(--good)' : 'var(--bad)'; m.textContent = r.ok ? 'Probni e-mail poslan na ' + r.to + (r.from ? ' (pošiljatelj ' + r.from + ')' : '') + '.' : 'Slanje nije uspjelo: ' + r.error; }
     catch (e) { m.style.color = 'var(--bad)'; m.textContent = e.message; }
   }
 
@@ -1594,6 +1700,8 @@ function initApp() {
     }
   }
   function campTypeChanged(sel, startId, endId) { annSync(sel.id, true); }
+  document.addEventListener('change', (e) => { const id = e.target && e.target.id; if (id === 'plType' || id === 'plMonths' || id === 'plStart') plSync(true); });
+  document.addEventListener('input', (e) => { if (e.target && e.target.id === 'plAmt') plSync(false); });
   document.addEventListener('input', (e) => { const id = e.target && e.target.id; if (!id) return; Object.keys(ANN).forEach((t) => { if (ANN[t][0] === id) annSync(t, false); }); });
   document.addEventListener('change', (e) => {
     const id = e.target && e.target.id; if (!id) return;
@@ -2074,13 +2182,19 @@ function initApp() {
       else if (act === 'pwchange') pwChange();
       else if (act === 'usave') userSave(a.closest('tr'));
       else if (act === 'ucreate') userCreate();
-      else if (act === 'mailtest') mailTest();
+      else if (act === 'mailtest') mailTest(1);
+      else if (act === 'mailtest2') mailTest(2);
       else if (act === 'bkrun') runBackup();
       else if (act === 'secsave') secSave();
       else if (act === 'ipunblock') ipUnblock(a.dataset.ip);
       else if (act === 'aldone') alertDone(a.dataset.id);
       else if (act === 'alrenew') alertRenew(a.dataset.id);
       else if (act === 'alextend') alertExtend(a.dataset.id);
+      else if (act === 'rquick') replyInsert(a.dataset.id);
+      else if (act === 'rtplshow') { $('rTplRow').hidden = !$('rTplRow').hidden; if (!$('rTplRow').hidden) $('rTplName').focus(); }
+      else if (act === 'rtplsave') replySaveTpl();
+      else if (act === 'plsave') plSave();
+      else if (act === 'plcancel') toolClose();
       else if (act === 'dncadd') dncAdd();
       else if (act === 'dncrm') dncRemove(a.dataset.id);
       else if (act === 'dnccl') dncClient(a.dataset.id);
@@ -2099,6 +2213,8 @@ function initApp() {
     else if (id === 'fOwner') { S.fOwner = ev.target.value; renderClients(); }
     else if (id === 'fKind') { S.fKind = ev.target.value; renderClients(); }
     else if (id === 'fIndustry') { S.fIndustry = ev.target.value; renderClients(); }
+    else if (id === 'fVK') { S.fVK = ev.target.value; renderClients(); }
+    else if (id === 'fNotes') { S.fNotes = ev.target.checked; renderClients(); }
     else if (id === 'tkWho') { S.tkWho = ev.target.value; document.activeElement.blur(); renderTasksTab(); }
     else if (id === 'revUser') { S.revUser = ev.target.value; renderRevenue(); }
     else if (id === 'iKind') { const o = ev.target.value === 'osoba'; $('iContactW').hidden = o; $('iNameL').textContent = o ? 'Ime i prezime' : 'Naziv tvrtke'; }
@@ -2123,6 +2239,8 @@ function initApp() {
   });
   document.addEventListener('input', (ev) => {
     if (ev.target.id === 'fq') { S.q = ev.target.value; renderClients(); }
+    if (ev.target.id === 'fVMin') { S.fVMin = ev.target.value; renderClients(); }
+    if (ev.target.id === 'fVMax') { S.fVMax = ev.target.value; renderClients(); }
     else if (ev.target.id === 'iq') { S.iq = ev.target.value; renderInbox(); }
     else if (ev.target.id === 'nName' || ev.target.id === 'nOib' || ev.target.id === 'nEmail') checkDupes();
     else if (ev.target.id === 'gq') { clearTimeout(gTimer); const v = ev.target.value; gTimer = setTimeout(() => globalSearch(v), 250); }

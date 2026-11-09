@@ -884,3 +884,20 @@ body{background:
 .tscroll .tbl th{white-space:normal;line-height:1.25}
 th,.tbl th,.rev thead th,.chead span{font-size:13px}
 small,.nums small,.hint,.muted.small,.alrow small,.li .a small{font-size:13.5px}
+/* v6: lijevak, usporedbe */
+.funnel{display:flex;flex-direction:column;align-items:center;gap:6px;margin:6px 0 14px}
+.funnel .fn{width:var(--w,100%);min-width:260px;max-width:100%;border-radius:14px;padding:14px 18px;color:#fff;box-shadow:0 6px 18px -8px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:2px}
+.funnel .fn span{font-size:13px;letter-spacing:.06em;text-transform:uppercase;opacity:.95}
+.funnel .fn b{font-size:26px;line-height:1.1}
+.funnel .fn small{font-size:13.5px;opacity:.95}
+.funnel .fn.neg{background:linear-gradient(135deg,#f59e0b,#d97706)}
+.funnel .fn.con{background:linear-gradient(135deg,#10b981,#047857)}
+.funnel .fn.arrow{background:none;box-shadow:none;color:var(--muted,#64748b);font-weight:600;align-items:center;min-width:0;padding:2px}
+b.up{color:#047857}b.down{color:#b91c1c}
+.toolbar .f.sm input{width:92px}
+.toolbar .chk.inl{align-self:end;padding-bottom:8px;white-space:nowrap}
+.quick{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.chipbtn{border:1px solid var(--line,#d7dde6);background:linear-gradient(180deg,#fff,#f3f7ff);border-radius:999px;padding:6px 12px;font-size:13.5px;cursor:pointer}
+.chipbtn:hover{background:#e8f0ff;border-color:#8fb0f0}
+.rsavetpl{margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tkassign{display:flex;gap:8px;align-items:end;margin:10px 0}
