@@ -707,7 +707,7 @@ function initApp() {
     {
       const target = incoming ? (e.replyTo || e.fromEmail) : e.to;
       h += '<div class="sec"><h3>' + 'Odgovor' + '</h3><div class="compose"><textarea id="rBody" placeholder="Upišite odgovor. Citat izvorne poruke dodaje se automatski."></textarea><div class="foot"><span class="msg" id="rMsg" role="alert"></span><button class="btn primary" data-act="reply" data-id="' + esc(e.id) + '">Pošalji odgovor</button></div></div>' +
-        '<p class="hint">Odgovor odlazi s adrese ' + esc(S.mail.from) + ' na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
+        '<p class="hint">Odgovor odlazi s adrese ' + esc(e.box === 2 && S.mail.from2 ? S.mail.from2 : S.mail.from) + ' (sandučić na koji je poruka stigla) na ' + esc(target) + '. Dodaje se Vaš potpis.</p></div>';
     }
     h += '</div>';
     sh.innerHTML = h;
@@ -974,21 +974,25 @@ function initApp() {
       h += '<section class="panel-b"><header><h3>Pošta</h3><span class="muted">sandučić za slanje i primanje</span></header><div class="pad">' +
         '<dl class="meta-grid"><dt>Adresa</dt><dd>' + esc(S.mail.from || 'nije podešena') + '</dd><dt>Slanje (SMTP)</dt><dd>' + (S.mail.enabled ? 'podešeno' : 'nije podešeno') + '</dd>' +
         '<dt>Primanje (IMAP)</dt><dd>' + (S.mail.imap ? 'podešeno, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync)) : 'nije podešeno') + '</dd>' +
-        '<dt>Inbox 2 (samo primanje)</dt><dd>' + (S.mail.imap2 ? 'podešen, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync2)) + (S.mail.error2 && S.mail.error2 !== 'error' ? ' · greška: ' + esc(S.mail.error2) : '') : 'nije podešen (config.php, odjeljak imap2)') + '</dd>' +
+        '<dt>Inbox 2 (primanje i slanje)</dt><dd>' + (S.mail.imap2 ? 'podešen, zadnje osvježeno ' + esc(minAgo(S.mail.lastSync2)) + (S.mail.error2 && S.mail.error2 !== 'error' ? ' · greška: ' + esc(S.mail.error2) : '') : 'nije podešen (config.php, odjeljak imap2)') + '</dd>' +
         (S.mail.error && S.mail.error !== 'error' ? '<dt>Zadnja greška</dt><dd>' + esc(S.mail.error) + '</dd>' : '') + '</dl>' +
         '<div class="msg" id="mtMsg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="mailtest"' + (S.mail.enabled ? '' : ' disabled') + '>Pošalji probni e-mail meni</button>' +
         '<button class="btn" data-act="syncnow"' + (S.mail.imap ? '' : ' disabled') + '>Osvježi poštu sada</button></div></div></section>';
       h += '<section class="panel-b" id="secPanel">' + secHtml() + '</section>';
       h += '<section class="panel-b" id="bkPanel">' + bkHtml() + '</section>';
       const ic = S.mail.imap2Cfg || { host: '', port: 993, secure: 'ssl', user: '', folder: 'INBOX', hasPass: false, source: '' };
-      h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (samo primanje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
-        '<p class="hint">Dodatni sandučić čije se poruke vide u Inboxu pod "Inbox 2". Pošta se i dalje šalje isključivo s adrese ' + esc(S.mail.from || 'marketing@vip-grupa.eu') + '.' + (ic.source === 'config' ? ' Trenutno se koriste podaci iz config.php; spremanjem ovdje zamjenjuju se.' : '') + '</p>' +
+      h += '<section class="panel-b" id="box2form"><header><h3>Inbox 2 (primanje i odgovaranje)</h3><span class="muted">' + (S.mail.imap2 ? 'podešen' : 'nije podešen') + '</span></header><div class="pad">' +
+        '<p class="hint">Dodatni sandučić čije se poruke vide u Inboxu pod "Inbox 2". Odgovori na poruke iz Inboxa 2 šalju se s adrese ovog sandučića; odgovori na ostale poruke s adrese ' + esc(S.mail.from || 'marketing@vip-grupa.eu') + '.' + (ic.source === 'config' ? ' Trenutno se koriste podaci iz config.php; spremanjem ovdje zamjenjuju se.' : '') + '</p>' +
         '<div class="grid2"><label class="f">IMAP poslužitelj<input id="b2Host" value="' + esc(ic.host || 'mail.vip-grupa.eu') + '" autocomplete="off" placeholder="mail.vip-grupa.eu"></label>' +
         '<label class="f">Port<input id="b2Port" type="number" min="1" max="65535" value="' + esc(ic.port || 993) + '"></label>' +
         '<label class="f">Sigurnost<select id="b2Sec"><option value="ssl"' + (ic.secure === 'ssl' ? ' selected' : '') + '>SSL/TLS (port 993)</option><option value="tls"' + (ic.secure === 'tls' ? ' selected' : '') + '>STARTTLS (port 143)</option><option value="none"' + (ic.secure === 'none' ? ' selected' : '') + '>Bez šifriranja</option></select></label>' +
         '<label class="f">Mapa<input id="b2Folder" value="' + esc(ic.folder || 'INBOX') + '" autocomplete="off"></label>' +
         '<label class="f">Korisnik (e-mail adresa)<input id="b2User" type="email" value="' + esc(ic.user) + '" autocomplete="off"></label>' +
-        '<label class="f">Lozinka<input id="b2Pass" type="password" autocomplete="new-password" placeholder="' + (ic.hasPass ? 'spremljena, ostavite prazno da ostane' : 'lozinka sandučića') + '"></label></div>' +
+        '<label class="f">Lozinka<input id="b2Pass" type="password" autocomplete="new-password" placeholder="' + (ic.hasPass ? 'spremljena, ostavite prazno da ostane' : 'lozinka sandučića') + '"></label>' +
+        '<label class="f">SMTP poslužitelj (slanje)<input id="b2SHost" value="' + esc(ic.smtpHost || ic.host || '') + '" autocomplete="off" placeholder="isti kao IMAP"></label>' +
+        '<label class="f">SMTP port<input id="b2SPort" type="number" min="1" max="65535" value="' + esc(ic.smtpPort || 465) + '"></label>' +
+        '<label class="f">SMTP sigurnost<select id="b2SSec"><option value="ssl"' + ((ic.smtpSecure || 'ssl') === 'ssl' ? ' selected' : '') + '>SSL/TLS (port 465)</option><option value="tls"' + (ic.smtpSecure === 'tls' ? ' selected' : '') + '>STARTTLS (port 587)</option><option value="none"' + (ic.smtpSecure === 'none' ? ' selected' : '') + '>Bez šifriranja</option></select></label>' +
+        '<label class="f">Naziv pošiljatelja (neobavezno)<input id="b2FName" value="' + esc(ic.fromName || '') + '" autocomplete="off" placeholder="npr. Sjeverni FM"></label></div>' +
         '<div class="msg" id="b2Msg" role="alert"></div><div class="row-btns start"><button class="btn" data-act="b2test">Provjeri vezu</button><button class="btn primary" data-act="b2save">Spremi</button>' + (ic.source === 'settings' ? '<button class="btn danger" data-act="b2clear">Ukloni Inbox 2</button>' : '') + '</div></div></section>';
       const st = S.settings || { autoreply: { enabled: true, subject: '', body: '' }, reportEnabled: true, workHours: '' };
       h += '<section class="panel-b"><header><h3>Automatski odgovor izvan radnog vremena</h3><span class="muted">radno vrijeme: ' + esc(st.workHours) + '</span></header><div class="pad">' +
@@ -1022,10 +1026,10 @@ function initApp() {
     const ok = await safe(() => call('signature_save', { signature: $('sigText').value.trim() }), 'Potpis spremljen');
     if (ok) refresh(true);
   }
-  function b2Body() { return { host: $('b2Host').value.trim(), port: Number($('b2Port').value) || 993, secure: $('b2Sec').value, folder: $('b2Folder').value.trim(), user: $('b2User').value.trim(), pass: $('b2Pass').value }; }
+  function b2Body() { return { host: $('b2Host').value.trim(), port: Number($('b2Port').value) || 993, secure: $('b2Sec').value, folder: $('b2Folder').value.trim(), user: $('b2User').value.trim(), pass: $('b2Pass').value, smtp_host: $('b2SHost').value.trim(), smtp_port: Number($('b2SPort').value) || 465, smtp_secure: $('b2SSec').value, from_name: $('b2FName').value.trim() }; }
   async function b2Test() {
     const m = $('b2Msg'); m.textContent = 'Provjeravam vezu…';
-    try { const r = await call('imap2_test', b2Body()); m.textContent = r.ok ? 'Veza radi: prijava i mapa su u redu. Kliknite Spremi.' : r.error; } catch (e) { m.textContent = e.message; }
+    try { const r = await call('imap2_test', b2Body()); m.textContent = r.ok ? 'Veza radi: primanje (IMAP) i slanje (SMTP) su u redu. Kliknite Spremi.' : r.error; } catch (e) { m.textContent = e.message; }
   }
   async function b2Save() {
     const m = $('b2Msg'); m.textContent = '';
