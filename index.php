@@ -54,6 +54,7 @@ $v = static function (string $f): string {
       <button class="tab" role="tab" data-tab="pregled" id="t-pregled">Pregled</button>
       <button class="tab" role="tab" data-tab="klijenti" id="t-klijenti">Klijenti</button>
       <button class="tab" role="tab" data-tab="aktivni" id="t-aktivni">Aktivni klijenti</button>
+      <button class="tab" role="tab" data-tab="zadaci" id="t-zadaci">Zadaci</button>
       <button class="tab" role="tab" data-tab="inbox" id="t-inbox">Inbox <span class="badge" id="inboxBadge" hidden></span></button>
       <button class="tab" role="tab" data-tab="kampanje" id="t-kampanje">E-mail kampanje</button>
       <button class="tab" role="tab" data-tab="tim" id="t-tim">Tim</button>
@@ -108,6 +109,7 @@ $v = static function (string $f): string {
   </section>
 
   <section class="view" id="v-aktivni" role="tabpanel" aria-labelledby="t-aktivni" hidden></section>
+  <section class="view" id="v-zadaci" role="tabpanel" aria-labelledby="t-zadaci" hidden></section>
   <section class="view" id="v-kampanje" role="tabpanel" aria-labelledby="t-kampanje" hidden></section>
   <section class="view" id="v-tim" role="tabpanel" aria-labelledby="t-tim" hidden></section>
   <section class="view" id="v-postavke" role="tabpanel" aria-labelledby="t-postavke" hidden></section>
