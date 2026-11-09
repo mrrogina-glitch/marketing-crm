@@ -1679,10 +1679,10 @@ function initApp() {
     }
     renderMcQueue(); renderMcStats(); loadMcOverview(); renderDnc(); loadDnc();
   }
-  const mcLim = () => { const o = mcState().ov; return { n: o ? o.perHour : 45, w: o ? 'od ' + o.window.replace('–', ' do ') : 'od 02:00 do 19:00' }; };
+  const mcLim = () => { const o = mcState().ov; const lim = o && o.rateDay !== o.rateNight ? '09–15 h: ' + o.rateDay + ', 16–08 h: ' + o.rateNight : ''; return { n: o ? o.perHour : 55, w: lim ? lim + ' na sat' : 'bez ograničenja termina' }; };
   function mcHintText() {
     if (!$('mcHint')) return;
-    $('mcHint').textContent = mcState().mode === 'group' ? 'Oznake {{ime}}, {{tvrtka}}, {{usluga}} i {{moje_ime}} svakom se primatelju popune osobno. Potpis prodavača dodaje se automatski. Slanje: najviše ' + mcLim().n + ' poruka na sat, ' + mcLim().w + (isAdmin() ? '.' : '. Grupne poruke korisnika šalju se tek nakon odobrenja administratora.') : 'Oznake {{ime}}, {{tvrtka}} i {{usluga}} popunjavaju se podacima odabranog klijenta. Potpis se dodaje automatski.';
+    $('mcHint').textContent = mcState().mode === 'group' ? 'Oznake {{ime}}, {{tvrtka}}, {{usluga}} i {{moje_ime}} svakom se primatelju popune osobno. Potpis prodavača dodaje se automatski. Slanje: najviše ' + mcLim().n + ' poruka na sat (' + mcLim().w + ')' + (isAdmin() ? '.' : '. Grupne poruke korisnika šalju se tek nakon odobrenja administratora.') : 'Oznake {{ime}}, {{tvrtka}} i {{usluga}} popunjavaju se podacima odabranog klijenta. Potpis se dodaje automatski.';
   }
   function mcMode(m) {
     const M = mcState(); M.mode = m; M.ack = false;
@@ -1718,8 +1718,8 @@ function initApp() {
     }
     if (!o) { el.innerHTML = '<header><h3>Red slanja</h3></header><p class="muted pad">Učitavanje…</p>'; return; }
     const eta = o.eta ? new Date(o.eta) : null;
-    let h = '<header><h3>Red slanja grupne pošte</h3><span class="muted">najviše ' + o.perHour + ' poruka na sat, termin ' + esc(o.window) + '</span></header><div class="pad">' +
-      '<p class="mcline"><span class="chip ' + (o.windowOpen ? 'ok' : '') + '">' + (o.windowOpen ? 'Slanje je sada dopušteno' : 'Izvan termina slanja') + '</span> <b class="nums">' + o.sentLastHour + ' / ' + o.perHour + '</b> poslano u zadnjih sat vremena · na čekanju: <b class="nums">' + o.pending + '</b>' +
+    let h = '<header><h3>Red slanja grupne pošte</h3><span class="muted">od 09 do 15 h najviše ' + (o.rateDay || o.perHour) + ' poruka na sat, od 16 do 08 h najviše ' + (o.rateNight || o.perHour) + ' · odgovori iz Inboxa i pojedinačni mailovi imaju prednost</span></header><div class="pad">' +
+      '<p class="mcline"><span class="chip ' + (o.windowOpen ? 'ok' : '') + '">' + (o.windowOpen ? 'Slanje je sada dopušteno' : 'Izvan termina slanja') + '</span> <b class="nums">' + (o.sentLastHour + (o.individualLastHour || 0)) + ' / ' + o.perHour + '</b> poslano u zadnjih sat vremena (grupnih ' + o.sentLastHour + ', pojedinačnih ' + (o.individualLastHour || 0) + ') · na čekanju: <b class="nums">' + o.pending + '</b>' +
       (eta && o.pending ? ' · procjena završetka: <b>' + esc(fmtTs(o.eta)) + '</b>' : '') + '</p>';
     if (o.batches.length) {
       h += '<div class="tblwrap"><table class="rev"><thead><tr><th>Kada</th><th>Predmet</th>' + (isAdmin() ? '<th>Prodavač</th>' : '') + '<th>Poslano</th><th>Stanje</th><th></th></tr></thead><tbody>' +
@@ -1867,7 +1867,7 @@ function initApp() {
           M.pv = { subject, body, ids };
           const lim = mcLim(); const d = new Date(Date.now() + 86400000); d.setHours(9, 0, 0, 0); const loc = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T09:00';
           mcModal('<p class="mcline"><b class="nums">' + pv.total + '</b> ' + pl3(pv.total, 'primatelj', 'primatelja', 'primatelja') + '. Ovako će poruke izgledati primateljima (prikazano ' + pv.samples.length + ' primjera):</p>' + mcSamples(pv.samples) +
-            '<fieldset class="mcwhen"><legend>Slanje</legend><label class="chk"><input type="radio" name="mcWhen" value="now" checked> Što prije (najviše ' + lim.n + ' na sat, ' + esc(lim.w) + ')</label>' +
+            '<fieldset class="mcwhen"><legend>Slanje</legend><label class="chk"><input type="radio" name="mcWhen" value="now" checked> Što prije (najviše ' + lim.n + ' na sat; ' + esc(lim.w) + ')</label>' +
             '<label class="chk"><input type="radio" name="mcWhen" value="later"> Zakaži za <input type="datetime-local" id="mcAt" value="' + loc + '"></label></fieldset>' +
             (pv.needsApproval ? '<p class="banner info">Poruke se neće poslati dok ih ne odobri administrator. Administrator dobiva obavijest.</p>' : '') +
             '<div class="msg" id="mcPvMsg" role="alert"></div><div class="foot"><button class="btn" data-mc="pvclose">Natrag na uređivanje</button><button class="btn primary" data-mc="confirmsend">' + (pv.needsApproval ? 'Pošalji na odobrenje' : 'Potvrdi i stavi u red') + '</button></div>');
