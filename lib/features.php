@@ -887,7 +887,7 @@ function client_diff(array $old, array $new): string
 function task_out(array $r, array $notes = []): array
 {
     return ['id' => (string) $r['id'], 'clientId' => $r['client_id'] !== null ? (string) $r['client_id'] : '', 'title' => (string) $r['title'],
-        'descr' => (string) ($r['descr'] ?? ''),
+        'descr' => (string) ($r['descr'] ?? ''), 'repeat' => (string) ($r['repeat_every'] ?? ''),
         'due' => (string) ($r['due_date'] ?? ''), 'assigneeId' => (string) $r['assignee_id'], 'createdBy' => (string) $r['created_by'],
         'createdAt' => (int) $r['created_at'],
         'takenAt' => !empty($r['taken_at']) ? (int) $r['taken_at'] : 0, 'takenBy' => !empty($r['taken_by']) ? (string) $r['taken_by'] : '',
@@ -1105,6 +1105,7 @@ function run_background_jobs(bool $force = false): array
         $out['report_month'] = monthly_report_if_due();
         $out['backup'] = backup_auto_if_due();
         $out['contact'] = contact_reminders_run();
+        $out['negot'] = negotiation_reminders_run();
     } catch (Throwable $e) {
         error_log('CRM jobs: ' . $e->getMessage());
         $out['error'] = $e->getMessage();
@@ -1320,4 +1321,18 @@ function user_stats(array $u, string $from, string $to): array
 function camp_months_val($v): int
 {
     return max(1, min(12, (int) $v ?: 12));
+}
+
+
+/** Sljedeći rok ponavljajućeg zadatka: nakon trenutnog roka, a najranije sutra. */
+function task_next_due(string $due, string $repeat): string
+{
+    $step = ['dnevno' => '+1 day', 'tjedno' => '+1 week', 'mjesecno' => '+1 month'][$repeat] ?? '+1 week';
+    $d = $due !== '' ? $due : date('Y-m-d');
+    $n = date('Y-m-d', strtotime($d . ' ' . $step));
+    $guard = 0;
+    while ($n <= date('Y-m-d') && $guard++ < 400) {
+        $n = date('Y-m-d', strtotime($n . ' ' . $step));
+    }
+    return $n;
 }

@@ -267,6 +267,18 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        29 => [
+            "ALTER TABLE tasks ADD repeat_every VARCHAR(10) NOT NULL DEFAULT ''",
+        ],
+        28 => [
+            "CREATE INDEX ix_clients_oib ON clients (oib)",
+            "CREATE INDEX ix_clients_email ON clients (email)",
+            "CREATE INDEX ix_clients_camp ON clients (camp_active, camp_end)",
+            "CREATE INDEX ix_campaigns_end ON campaigns (end_date)",
+            "CREATE INDEX ix_clients_status_owner ON clients (status, owner_id)",
+            "CREATE INDEX ix_campaigns_client_end ON campaigns (client_id, end_date)",
+            "CREATE INDEX ix_tasks_due ON tasks (done_at, due_date)",
+        ],
         27 => [
             "ALTER TABLE clients ADD camp_months TINYINT NOT NULL DEFAULT 12",
             "ALTER TABLE campaigns ADD camp_months TINYINT NOT NULL DEFAULT 12",
