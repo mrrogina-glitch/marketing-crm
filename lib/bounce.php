@@ -243,6 +243,12 @@ function bounce_handle_quota(array $e, array $p): bool
         run('INSERT INTO bounce_cases (email_id, client_id, kind, bad_email, orig_subject, status, created_at, resend_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [$e['id'], $clientId, 'quota', $to, mb_substr($subj, 0, 255), $status, $now, $status === 'resent' ? $now : null]);
     };
+    if ($subj === '' && $to !== '') {
+        // povratna poruka često ne sadrži zaglavlja izvorne poruke: izvorna poruka se traži po primatelju (zadnja poslana prije povrata)
+        $os = row("SELECT subject FROM scheduled_emails WHERE LOWER(to_email) = ? AND status = 'sent' AND sent_at <= ? AND sent_at > ? ORDER BY sent_at DESC LIMIT 1", [$to, (int) $e['msg_date'] + 60000, $now - 4 * DAY_MS]);
+        $oe = $os ? null : row("SELECT subject FROM emails WHERE direction = 'out' AND auto = 0 AND LOWER(to_email) = ? AND msg_date <= ? AND msg_date > ? ORDER BY msg_date DESC LIMIT 1", [$to, (int) $e['msg_date'] + 60000, $now - 4 * DAY_MS]);
+        $subj = $os ? (string) $os['subject'] : ($oe ? (string) $oe['subject'] : '');
+    }
     if ($subj === '' || (int) $e['msg_date'] < $now - 3 * DAY_MS) {
         $record('ignored', null);
         return false;
