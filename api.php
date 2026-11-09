@@ -713,6 +713,7 @@ try {
             [$campA, $campS, $campE, $campV, $campT] = f_campaign($in);
             if ($campA === 1) {
                 $status = 'aktivni';
+                $vkind = 'ugovoreno'; // aktivna kampanja = ugovoreno
             }
             $note = f_text($in, 'note', 'Prva bilješka');
             $mailId = !empty($in['email_id']) ? (int) load_email((string) $in['email_id'])['id'] : null;
@@ -926,6 +927,7 @@ try {
                 run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ?, camp_type = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $campT, $c['id']]);
                 if ($campA === 1) {
                     mark_client_active($c, (int) $u['id'], ms());
+                    run("UPDATE clients SET value_kind = 'ugovoreno' WHERE id = ?", [$c['id']]);
                 }
             }
             if (array_key_exists('email2', $in)) {
@@ -1028,6 +1030,7 @@ try {
                     run('UPDATE clients SET camp_active = ?, camp_start = ?, camp_end = ?, camp_value = ?, camp_type = ? WHERE id = ?', [$campA, $campS, $campE, $campV, $campT, $c['id']]);
                     if ($campA === 1) {
                         mark_client_active($c, (int) $u['id'], $t);
+                        run("UPDATE clients SET value_kind = 'ugovoreno' WHERE id = ?", [$c['id']]);
                     }
                 }
             });
