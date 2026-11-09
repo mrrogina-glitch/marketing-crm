@@ -267,6 +267,10 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        24 => [
+            "ALTER TABLE clients ADD camp_type VARCHAR(10) NOT NULL DEFAULT 'jednokratno'",
+            "ALTER TABLE campaigns ADD camp_type VARCHAR(10) NOT NULL DEFAULT 'jednokratno'",
+        ],
         23 => [
             static function (PDO $pdo): void {
                 $now = (int) (microtime(true) * 1000);

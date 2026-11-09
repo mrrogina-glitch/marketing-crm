@@ -741,8 +741,8 @@ function archive_campaign(array $c, int $userId): void
     if (empty($c['camp_end'])) {
         return;
     }
-    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms(), (string) ($c['service'] ?? ''), $c['owner_id'] ?? null]);
+    run('INSERT INTO campaigns (client_id, start_date, end_date, value, created_by, created_at, service, owner_id, camp_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$c['id'], $c['camp_start'] ?: null, $c['camp_end'], $c['camp_value'] ?? 0, $userId, ms(), (string) ($c['service'] ?? ''), $c['owner_id'] ?? null, ($c['camp_type'] ?? '') === 'godisnji' ? 'godisnji' : 'jednokratno']);
 }
 
 /* ---------- dnevnik promjena ---------- */
@@ -856,17 +856,46 @@ function revenue_report(array $u): array
     $admin = $u['role'] === 'admin';
     $from = date('Y-m-d', strtotime('-400 days'));
     $items = [];
-    foreach (rows('SELECT client_id, start_date, end_date, value, service, owner_id FROM campaigns') as $r) {
-        $d0 = ($r['start_date'] ?: $r['end_date']);
-        $items[] = [$d0, (float) $r['value'], (string) $r['service'], $d0 ? owner_at((int) $r['client_id'], (int) (strtotime($d0 . ' 23:59:59') * 1000), $r['owner_id']) : $r['owner_id']];
+    $now = date('Y-m-d');
+    /* jednokratna kampanja: cijeli iznos u razdoblju početka; godišnji ugovor: iznos / 12 po mjesecu (u tjednom prikazu / 52 po tjednu), 12 mjeseci od početka */
+    $add = static function (?string $d0, float $v, string $svc, $ownerFn, string $type) use (&$items, $now): void {
+        if (!$d0) {
+            return;
+        }
+        if ($type !== 'godisnji') {
+            $items[] = [$d0, $v, $svc, $ownerFn($d0), 'all'];
+            return;
+        }
+        $st = strtotime($d0);
+        for ($k = 0; $k < 12; $k++) {
+            $md = $k === 0 ? $d0 : date('Y-m-01', strtotime('+' . $k . ' month', strtotime(date('Y-m-01', $st))));
+            if ($md > $now) {
+                break;
+            }
+            $items[] = [$md, $v / 12, $svc, $ownerFn($md), 'm'];
+        }
+        $mon = strtotime('monday this week', $st);
+        for ($k = 0; $k < 52; $k++) {
+            $wd = date('Y-m-d', strtotime('+' . $k . ' week', $mon));
+            if ($wd > $now) {
+                break;
+            }
+            $items[] = [$wd, $v / 52, $svc, $ownerFn($wd), 'w'];
+        }
+    };
+    foreach (rows('SELECT client_id, start_date, end_date, value, service, owner_id, camp_type FROM campaigns') as $r) {
+        $cid = (int) $r['client_id'];
+        $ow = $r['owner_id'];
+        $add(($r['start_date'] ?: $r['end_date']), (float) $r['value'], (string) $r['service'], static fn ($d) => owner_at($cid, (int) (strtotime($d . ' 23:59:59') * 1000), $ow), (string) ($r['camp_type'] ?? ''));
     }
-    foreach (rows('SELECT id, camp_start, camp_end, camp_value, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
-        $d1 = ($r['camp_start'] ?: $r['camp_end']);
-        $items[] = [$d1, (float) $r['camp_value'], (string) $r['service'], $d1 ? owner_at((int) $r['id'], (int) (strtotime($d1 . ' 23:59:59') * 1000), $r['owner_id']) : $r['owner_id']];
+    foreach (rows('SELECT id, camp_start, camp_end, camp_value, camp_type, service, owner_id FROM clients WHERE camp_active = 1') as $r) {
+        $cid = (int) $r['id'];
+        $ow = $r['owner_id'];
+        $add(($r['camp_start'] ?: $r['camp_end']), (float) $r['camp_value'], (string) $r['service'], static fn ($d) => owner_at($cid, (int) (strtotime($d . ' 23:59:59') * 1000), $ow), (string) ($r['camp_type'] ?? ''));
     }
     $w = [];
     $m = [];
-    foreach ($items as [$d, $v, $svc, $owner]) {
+    foreach ($items as [$d, $v, $svc, $owner, $scope]) {
         if (!$d || $d < $from || $v <= 0) {
             continue;
         }
@@ -884,8 +913,12 @@ function revenue_report(array $u): array
             $o = (string) ($owner ?? '0');
             $kw = $wk . '|' . $o . '|' . $s;
             $km = $mo . '|' . $o . '|' . $s;
-            $w[$kw] = ($w[$kw] ?? 0) + $part;
-            $m[$km] = ($m[$km] ?? 0) + $part;
+            if ($scope !== 'm') {
+                $w[$kw] = ($w[$kw] ?? 0) + $part;
+            }
+            if ($scope !== 'w') {
+                $m[$km] = ($m[$km] ?? 0) + $part;
+            }
         }
     }
     $fmt = static function (array $a): array {

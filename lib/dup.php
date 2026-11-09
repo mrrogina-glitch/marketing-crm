@@ -123,7 +123,7 @@ function clients_merge(int $keepId, array $removeIds, int $userId): array
                 }
             }
             if ((int) $keep['camp_active'] === 0 && (int) $r['camp_active'] === 1) {
-                foreach (['camp_active', 'camp_start', 'camp_end', 'camp_value'] as $f) {
+                foreach (['camp_active', 'camp_start', 'camp_end', 'camp_value', 'camp_type'] as $f) {
                     $fill[$f] = $r[$f];
                     $keep[$f] = $r[$f];
                 }
