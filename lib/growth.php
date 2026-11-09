@@ -117,6 +117,33 @@ function campaign_expired_notify(array $c, bool $lost): void
     }
 }
 
+
+/** Tjedan dana prije isteka: podsjetnik prodavaču s prijedlogom produljenja (isti broj dana kao dosadašnja kampanja). */
+function campaign_soon_notify(): int
+{
+    $n = 0;
+    $from = date('Y-m-d');
+    $to = date('Y-m-d', strtotime('+7 days'));
+    foreach (rows('SELECT * FROM clients WHERE camp_active = 1 AND camp_end IS NOT NULL AND camp_end >= ? AND camp_end <= ?', [$from, $to]) as $c) {
+        $uid = (int) $c['owner_id'];
+        if ($uid <= 0) {
+            continue;
+        }
+        $left = (int) round((strtotime((string) $c['camp_end']) - strtotime($from)) / 86400);
+        $len = campaign_renewal_proposal($c)['days'];
+        $newEnd = date('Y-m-d', strtotime((string) $c['camp_end'] . ' +' . $len . ' days'));
+        $val = number_format((float) $c['camp_value'], 2, ',', '.') . ' €';
+        $when = $left === 0 ? 'ističe danas' : ($left === 1 ? 'ističe sutra' : 'ističe za ' . $left . ' dana');
+        $body = 'Kampanja ' . $when . ' (' . date('d.m.Y.', strtotime((string) $c['camp_end'])) . '), vrijednost ' . $val . '.'
+            . "\nProduljenje: do " . date('d.m.Y.', strtotime($newEnd)) . ' (+' . $len . ' dana). Javite se klijentu prije isteka.';
+        if (alert_create($uid, (int) $c['id'], 'camp_soon', 'Kampanja uskoro ističe: ' . $c['name'], $body, ['newEnd' => $newEnd, 'days' => $len, 'end' => (string) $c['camp_end']], 'cs:' . $c['id'] . ':' . $c['camp_end'])) {
+            alert_mail($uid, 'Kampanja uskoro ističe: ' . $c['name'], 'kampanja klijenta "' . $c['name'] . "\" " . $when . ".\n\n" . $body . "\n\nU aplikaciji (Pregled > Obavijesti) kampanju možete produljiti jednim klikom.");
+            $n++;
+        }
+    }
+    return $n;
+}
+
 /* ---------- ne kontaktirati / odjava ---------- */
 
 function dnc_set(): array

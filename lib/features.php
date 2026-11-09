@@ -899,6 +899,51 @@ function revenue_report(array $u): array
     return ['weekly' => $fmt($w), 'monthly' => $fmt($m), 'scope' => $admin ? 'all' : 'mine'];
 }
 
+/** Tjedni ciljevi prihoda po prodavaču (€). Spremljeno u postavkama kao JSON {userId: iznos}. */
+function goals_get(): array
+{
+    $g = json_decode((string) setting_get('weekly_goals', '{}'), true);
+    return is_array($g) ? $g : [];
+}
+
+/** Napredak prema tjednom cilju: prodavač vidi samo svoj redak, administrator sve prodavače i zbroj. */
+function goals_report(array $u): array
+{
+    $goals = goals_get();
+    $admin = $u['role'] === 'admin';
+    $mon = date('Y-m-d', strtotime('monday this week'));
+    $prev = date('Y-m-d', strtotime('monday last week'));
+    $cur = [];
+    $pre = [];
+    foreach (revenue_report($u)['weekly'] as $r) {
+        if ($r['p'] === $mon) {
+            $cur[$r['u']] = ($cur[$r['u']] ?? 0) + $r['v'];
+        } elseif ($r['p'] === $prev) {
+            $pre[$r['u']] = ($pre[$r['u']] ?? 0) + $r['v'];
+        }
+    }
+    $rowsOut = [];
+    foreach (rows("SELECT id, name FROM users WHERE active = 1 AND role = 'sales' ORDER BY name") as $r) {
+        $id = (string) $r['id'];
+        if (!$admin && (int) $r['id'] !== (int) $u['id']) {
+            continue;
+        }
+        $goal = (float) ($goals[$id] ?? 0);
+        if ($goal <= 0 && !$admin) {
+            continue;
+        }
+        $rowsOut[] = ['userId' => $id, 'name' => (string) $r['name'], 'goal' => $goal, 'cur' => round($cur[$id] ?? 0, 2), 'prev' => round($pre[$id] ?? 0, 2)];
+    }
+    $tot = ['goal' => 0.0, 'cur' => 0.0, 'prev' => 0.0];
+    foreach ($rowsOut as $r) {
+        $tot['goal'] += $r['goal'];
+        $tot['cur'] += $r['cur'];
+        $tot['prev'] += $r['prev'];
+    }
+    $to = date('Y-m-d', strtotime($mon . ' +6 days'));
+    return ['week' => $mon, 'weekEnd' => $to, 'rows' => $rowsOut, 'total' => $admin ? $tot : null, 'admin' => $admin];
+}
+
 const STAGE_LABELS = ['novi' => 'Novi kontakt', 'kontaktiran' => 'Kontaktiran', 'ponuda' => 'Ponuda poslana', 'pregovori' => 'Pregovori', 'aktivni' => 'Aktivni', 'dobiven' => 'Dobiven', 'izgubljen' => 'Izgubljen'];
 
 /** Klijent s aktivnom kampanjom ima status Aktivni. */
@@ -947,6 +992,7 @@ function run_background_jobs(bool $force = false): array
     $out = [];
     try {
         $out['expired'] = expire_campaigns();
+        $out['soon'] = campaign_soon_notify();
         $out['scheduled'] = process_scheduled();
         $out['reminders'] = notify_reminders();
         $out['report'] = weekly_report_if_due();

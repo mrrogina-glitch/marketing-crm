@@ -267,6 +267,40 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        23 => [
+            static function (PDO $pdo): void {
+                $now = (int) (microtime(true) * 1000);
+                $tpl = [
+                    ['Odgovor: cjenik', 'Re: cjenik', "Poštovani/a {{ime}},\n\nhvala na upitu. U privitku Vam šaljemo cjenik naših usluga. Cijene ovise o trajanju i opsegu kampanje, pa Vam rado pripremimo ponudu prilagođenu tvrtki {{tvrtka}}.\n\nAko Vam odgovara, nazovite nas ili odgovorite na ovu poruku pa dogovaramo dalje."],
+                    ['Odgovor: ponuda', 'Re: ponuda', "Poštovani/a {{ime}},\n\nhvala na interesu. Pripremili smo ponudu za {{usluga}} za tvrtku {{tvrtka}}. Ponuda vrijedi 14 dana od datuma slanja.\n\nSve dodatne informacije rado ćemo Vam dati. Javite nam se kad Vam odgovara razgovor o detaljima."],
+                    ['Odgovor: dogovor termina', 'Re: dogovor termina', "Poštovani/a {{ime}},\n\nhvala na poruci. Predlažemo kratki sastanak ili telefonski razgovor, pa Vas molimo da nam javite koji Vam termin ovaj ili idući tjedan najbolje odgovara.\n\nPrilagodit ćemo se Vašem rasporedu."],
+                    ['Odgovor: zahvala', 'Re: zahvala', "Poštovani/a {{ime}},\n\nzahvaljujemo na povjerenju i suradnji. Ako Vam bilo što zatreba, slobodno nam se javite.\n\nLijep pozdrav,\n{{moje_ime}}"],
+                ];
+                $chk = $pdo->prepare('SELECT COUNT(*) FROM templates WHERE name = ?');
+                $ins = $pdo->prepare("INSERT INTO templates (name, subject, body, sort_order, updated_at, kind) VALUES (?, ?, ?, ?, ?, 'email')");
+                foreach ($tpl as $i => $t) {
+                    $chk->execute([$t[0]]);
+                    if ((int) $chk->fetchColumn() === 0) {
+                        $ins->execute([$t[0], $t[1], $t[2], 40 + $i, $now]);
+                    }
+                }
+            },
+            static function (PDO $pdo): void {
+                $goals = [];
+                foreach (['Ema' => 4500, 'Almira' => 4000] as $first => $amount) {
+                    $st = $pdo->prepare("SELECT id FROM users WHERE role = 'sales' AND name LIKE ? ORDER BY id LIMIT 1");
+                    $st->execute([$first . '%']);
+                    $id = $st->fetchColumn();
+                    if ($id) {
+                        $goals[(string) (int) $id] = $amount;
+                    }
+                }
+                if ($goals) {
+                    $pdo->exec("DELETE FROM settings WHERE k = 'weekly_goals'");
+                    $pdo->prepare("INSERT INTO settings (k, v) VALUES ('weekly_goals', ?)")->execute([json_encode($goals)]);
+                }
+            },
+        ],
         22 => [
             "ALTER TABLE clients ADD multi_camp TINYINT NOT NULL DEFAULT 0",
             "ALTER TABLE campaigns ADD title VARCHAR(190) NOT NULL DEFAULT ''",
