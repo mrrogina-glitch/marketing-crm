@@ -267,6 +267,9 @@ function migrate(PDO $pdo): void
             "CREATE INDEX ix_alerts_user ON alerts (user_id, done_at)",
             "CREATE UNIQUE INDEX ux_alerts_dedupe ON alerts (dedupe)",
         ],
+        18 => [
+            "ALTER TABLE clients ADD value_kind VARCHAR(10) NOT NULL DEFAULT 'ponudeno'",
+        ],
         17 => [
             "ALTER TABLE tasks ADD descr TEXT NULL",
             "ALTER TABLE tasks ADD taken_at $big NULL",
