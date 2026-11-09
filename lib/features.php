@@ -1223,21 +1223,28 @@ function campaign_queue(array $t, array $fallback): array
     $queued = 0;
     $skipped = 0;
     $batch = 'a' . $t['id'] . '-' . date('ymdHi');
+    $now0 = ms();
     foreach (campaign_recipients($aud) as $c) {
         $sender = $c['owner_id'] !== null ? row('SELECT * FROM users WHERE id = ? AND active = 1', [$c['owner_id']]) : null;
         $sender = $sender ?: $fallback;
         $subject = mb_substr(fill_template_text((string) $t['subject'], $c, (string) $sender['name']), 0, 255);
         $body = fill_template_text((string) $t['body'], $c, (string) $sender['name']);
-        if (row("SELECT id FROM scheduled_emails WHERE client_id = ? AND subject = ? AND status IN ('pending','sending','sent') AND created_at > ?", [$c['id'], $subject, ms() - 30 * DAY_MS])) {
+        if (row("SELECT id FROM scheduled_emails WHERE client_id = ? AND subject = ? AND status IN ('awaiting','pending','sending','sent') AND created_at > ?", [$c['id'], $subject, ms() - 30 * DAY_MS])) {
             $skipped++;
             continue;
         }
         run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at, bulk, batch)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)',
-            [$sender['id'], $c['id'], trim((string) $c['email']), $subject, $body, '', null, $at, 'pending', ms(), $batch]);
+            [$sender['id'], $c['id'], trim((string) $c['email']), $subject, $body, '', null, $at, 'awaiting', ms(), $batch]);
         $queued++;
     }
-    return ['queued' => $queued, 'skipped' => $skipped, 'sendAt' => $at];
+    if ($queued > 0) {
+        // akcija (predložak s odgodom) se šalje tek nakon odobrenja administratora, i kad je pokreće sam administrator
+        run('INSERT INTO mail_batches (batch, user_id, subject, body, total, send_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [$batch, $fallback['id'], mb_substr((string) $t['subject'], 0, 255), (string) $t['body'], $queued, $at, 'awaiting', $now0]);
+        audit(null, (int) $fallback['id'], 'update', 'Akcija čeka odobrenje: "' . $t['name'] . '" (' . $queued . ' primatelja)', '');
+    }
+    return ['queued' => $queued, 'skipped' => $skipped, 'sendAt' => $at, 'needsApproval' => true];
 }
 
 

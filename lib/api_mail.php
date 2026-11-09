@@ -52,10 +52,19 @@ switch ($action) {
             if ($docIds) {
                 load_attachments($docIds, (int) $c['id']); // validate now, fail early
             }
-            run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)',
-                [$u['id'], $c['id'], $to, $subject, $text, implode(',', array_unique($docIds)), $remind, $at, 'pending', ms()]);
-            out(['ok' => true, 'scheduled' => true, 'sendAt' => $at]);
+            approval_queue_single($u, $c, $to, $subject, $text, $docIds, $remind, $at, 's');
+            out(['ok' => true, 'scheduled' => true, 'needsApproval' => true, 'sendAt' => $at]);
+        }
+        if (!empty($in['followup'])) {
+            // podsjetnik klijentu koji nije odgovorio: šalje se tek nakon odobrenja administratora
+            if (!Mailer::configured()) {
+                throw new ApiError('E-mail još nije podešen. Administrator ga podešava u config.php.', 409);
+            }
+            if ($docIds) {
+                load_attachments($docIds, (int) $c['id']);
+            }
+            approval_queue_single($u, $c, $to, $subject, $text, $docIds, $remind, ms(), 'f');
+            out(['ok' => true, 'needsApproval' => true]);
         }
         send_and_store($u, $to, $subject, with_signature($text, $u), (int) $c['id'], null, $docIds, $remind);
         record_client_email($c, $u, $to, $subject, $text);
@@ -71,8 +80,11 @@ switch ($action) {
         if ($u['role'] !== 'admin' && (int) $s['user_id'] !== (int) $u['id']) {
             throw new ApiError('Zakazanu poruku može otkazati autor ili administrator.', 403);
         }
-        if (run("UPDATE scheduled_emails SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'failed')", [$s['id']]) !== 1) {
+        if (run("UPDATE scheduled_emails SET status = 'cancelled' WHERE id = ? AND status IN ('awaiting', 'pending', 'failed')", [$s['id']]) !== 1) {
             throw new ApiError('Poruka je već poslana ili se upravo šalje.', 409);
+        }
+        if ($s['batch'] !== null) {
+            run("UPDATE mail_batches SET status = 'cancelled' WHERE batch = ? AND status = 'awaiting'", [$s['batch']]);
         }
         out(['ok' => true]);
     }

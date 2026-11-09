@@ -292,7 +292,7 @@ function bulk_pending_count(?array $u = null): int
 }
 
 /** @param list<int> $ids */
-function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT, ?int $sendAt = null): array
+function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT, ?int $sendAt = null, bool $forceApproval = false): array
 {
     $batch = 'g' . date('ymdHis') . dechex(random_int(16, 255));
     $queued = 0;
@@ -300,7 +300,7 @@ function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT, ?int 
     $denied = 0;
     $now = ms();
     $at = $sendAt ?? $now;
-    $status = $u['role'] === 'admin' ? 'pending' : 'awaiting'; // poruke korisnika čekaju odobrenje administratora
+    $status = ($u['role'] === 'admin' && !$forceApproval) ? 'pending' : 'awaiting'; // poruke korisnika (i kampanja Povratak, čak i kad je šalje administrator) čekaju odobrenje administratora
     foreach (array_slice(array_values(array_unique($ids)), 0, 1000) as $id) {
         $c = row('SELECT * FROM clients WHERE id = ?', [$id]);
         $mail = $c ? trim((string) $c['email']) : '';
@@ -330,6 +330,23 @@ function bulk_queue(array $u, array $ids, string $subjectT, string $bodyT, ?int 
             [$batch, $u['id'], mb_substr($subjectT, 0, 255), $bodyT, $queued, $at, $status === 'awaiting' ? 'awaiting' : 'approved', $now]);
     }
     return ['queued' => $queued, 'skipped' => $skipped, 'denied' => $denied, 'batch' => $batch, 'needsApproval' => $status === 'awaiting', 'sendAt' => $at];
+}
+
+/**
+ * Jedna poruka (zakazana ili podsjetnik klijentu) koja prije slanja mora dobiti odobrenje administratora, i kad je šalje sam administrator.
+ * @param list<int> $docIds
+ */
+function approval_queue_single(array $u, array $c, string $to, string $subject, string $body, array $docIds, ?int $remind, int $at, string $kind = 's'): array
+{
+    $now = ms();
+    $batch = $kind . date('ymdHis') . dechex(random_int(16, 255));
+    run('INSERT INTO scheduled_emails (user_id, client_id, to_email, subject, body, doc_ids, remind_days, send_at, status, attempts, created_at, bulk, batch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?)',
+        [$u['id'], $c['id'], $to, $subject, $body, implode(',', array_unique($docIds)), $remind, $at, 'awaiting', $now, $batch]);
+    run('INSERT INTO mail_batches (batch, user_id, subject, body, total, send_at, status, created_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?)',
+        [$batch, $u['id'], mb_substr($subject, 0, 255), $body, $at, 'awaiting', $now]);
+    audit(null, (int) $u['id'], 'update', 'E-mail čeka odobrenje administratora: "' . $subject . '" (' . $c['name'] . ')', '');
+    return ['batch' => $batch, 'sendAt' => $at];
 }
 
 /** Grupne poruke koje čekaju odobrenje administratora. */

@@ -53,11 +53,11 @@ switch ($action) {
         if (!$ids) {
             throw new ApiError('U odabranom segmentu nema klijenata s ispravnom e-mail adresom.');
         }
-        $r = transaction(static fn () => bulk_queue($u, $ids, $subject, $text, null));
+        $r = transaction(static fn () => bulk_queue($u, $ids, $subject, $text, null, true));
         if ($r['queued'] === 0) {
             throw new ApiError('Nijedna poruka nije stavljena u red (primatelji su već dobili poruku s istim predmetom u zadnjih 30 dana).');
         }
-        audit(null, (int) $u['id'], 'update', 'Kampanja povratak: "' . $subject . '" (' . $r['queued'] . ' primatelja, segment: ' . ($city !== '' ? $city : 'svi') . ')', '');
+        audit(null, (int) $u['id'], 'update', 'Kampanja povratak čeka odobrenje: "' . $subject . '" (' . $r['queued'] . ' primatelja, segment: ' . ($city !== '' ? $city : 'svi') . ')', '');
         out(['ok' => true] + $r + ['eta' => bulk_eta(bulk_pending_count())]);
     }
 
