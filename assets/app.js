@@ -716,7 +716,7 @@ function initApp() {
       const rb = e.dir === 'in' && e.repliedBy ? person(e.repliedBy) : '';
       return '<button class="mrow' + (unread ? ' unread' : '') + (rb ? ' replied' : '') + '" data-mail="' + esc(e.id) + '"><span class="dot"></span>' +
         '<span class="m-body"><span class="m-from">' + esc(who) + '</span>' + (e.dir === 'in' && e.to ? '<span class="m-to">Primljeno na: ' + esc(e.to) + '</span>' : '') + '<span class="m-subj">' + esc(e.subject || '(bez predmeta)') + (e.att ? ' · privitak' : '') + '</span><span class="m-prev">' + esc(e.preview) + '</span></span>' +
-        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : (e.dir === 'in' && S.mail.imap2 ? '<span class="chip">Inbox 1</span>' : '')) + '</span></button>';
+        '<span class="m-meta"><span class="nums">' + shortDate(e.date) + '</span><span class="m-del" role="button" tabindex="0" data-mdel="' + esc(e.id) + '" title="Obriši poruku" aria-label="Obriši poruku">🗑</span>' + (c ? '<span class="chip">' + esc(c.name) + '</span>' : (e.dir === 'out' ? '<span class="chip out">poslano</span>' : '')) + (rb ? '<span class="chip replied" title="Odgovor je poslan ' + esc(fmtTs(e.repliedAt)) + '">Odgovorio/la: ' + esc(rb) + '</span>' : '') + (e.auto ? '<span class="chip out">automatski</span>' : '') + (e.box === 2 ? '<span class="chip">Inbox 2</span>' : (e.dir === 'in' && S.mail.imap2 ? '<span class="chip">Inbox 1</span>' : '')) + '</span></button>';
     }).join('');
   }
   async function syncInbox(force, quiet) {
@@ -777,11 +777,11 @@ function initApp() {
     ta.value = ta.value.trim() ? ta.value.trim() + '\n\n' + body : body;
     $('rTpl').value = ''; ta.focus();
   }
-  async function deleteMail(id) {
+  async function deleteMail(id, fromList) {
     if (!confirm('Obrisati ovu poruku iz aplikacije? Radnja se ne može poništiti.')) return;
     let srv = '';
     const ok = await safe(async () => { const r = await call('email_delete', { id }); srv = r.server || ''; return r; }, '');
-    if (ok) { toast(srv === 'moved' ? 'Poruka obrisana i premještena u smeće na poslužitelju' : (srv === 'error' ? 'Poruka obrisana u aplikaciji, ali premještanje u smeće na poslužitelju nije uspjelo' : (srv === 'notfound' ? 'Poruka obrisana (na poslužitelju nije pronađena)' : 'Poruka obrisana')), srv === 'error'); S.emails = S.emails.filter((x) => x.id !== id); closeTop(); await refresh(true); }
+    if (ok) { toast(srv === 'moved' ? 'Poruka obrisana i premještena u smeće na poslužitelju' : (srv === 'error' ? 'Poruka obrisana u aplikaciji, ali premještanje u smeće na poslužitelju nije uspjelo' : (srv === 'notfound' ? 'Poruka obrisana (na poslužitelju nije pronađena)' : 'Poruka obrisana')), srv === 'error'); S.emails = S.emails.filter((x) => x.id !== id); if (fromList) renderInbox(); else closeTop(); await refresh(true); }
   }
   async function sendReply(id) {
     const ta = $('rBody'); const body = ta.value.trim();
@@ -1948,6 +1948,7 @@ function initApp() {
     if (!t.closest('.gsearch')) globalSearchClose();
     const tab = t.closest('[data-tab]'); if (tab) { setTab(tab.dataset.tab); return; }
     const per = t.closest('[data-period]'); if (per) { S.period = per.dataset.period; S.tmFrom = ''; S.tmTo = ''; renderTeam(); return; }
+    const mdel = t.closest('[data-mdel]'); if (mdel) { ev.preventDefault(); ev.stopPropagation(); deleteMail(mdel.dataset.mdel, true); return; }
     const mailBtn = t.closest('[data-mail]'); if (mailBtn) { openMailItem(mailBtn.dataset.mail); return; }
     const op = t.closest('[data-open]'); if (op) { const oid = op.dataset.open; const kp = !!op.dataset.keep; if (byId(oid)) openClient(oid, kp); else ensureClient(oid).then((ok) => { if (ok) { renderAll(); openClient(oid, kp); } }); return; }
     const a = t.closest('[data-act]');
