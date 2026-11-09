@@ -1051,7 +1051,7 @@ try {
             }
             $diff = $new ? client_diff($c, $new) : '';
             if ($valueChanged && $vkind !== (string) ($c['value_kind'] ?: 'ponudeno')) {
-                $diff = trim($diff . ' Vrsta vrijednosti: ' . ($vkind === 'ugovoreno' ? 'Ugovoreno' : 'Ponuđeno'));
+                $diff = trim($diff . ' Status: ' . ($vkind === 'ugovoreno' ? 'Ugovoreno' : 'Ponuđeno'));
             }
             if ($diff !== '') {
                 audit((int) $c['id'], (int) $u['id'], 'update', $diff, (string) $c['name']);
