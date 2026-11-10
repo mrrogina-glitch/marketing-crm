@@ -36,7 +36,7 @@
     }
     renderMcQueue(); renderMcStats(); loadMcOverview(); renderDnc(); loadDnc();
   }
-  const mcLim = () => { const o = mcState().ov; const lim = o && o.rateDay !== o.rateNight ? '08–16 h: ' + o.rateDay + ', 16–08 h: ' + o.rateNight : ''; return { n: o ? o.perHour : 55, w: lim ? lim + ' na sat' : 'bez ograničenja termina' }; };
+  const mcLim = () => { const o = mcState().ov; const lim = o && o.rateDay !== o.rateNight ? '08–16 h: ' + o.rateDay + ', 16–08 h: ' + o.rateNight + (o.rateWeekend ? ', sub–ned: ' + o.rateWeekend : '') : ''; return { n: o ? o.perHour : 55, w: lim ? lim + ' na sat' : 'bez ograničenja termina' }; };
   function mcHintText() {
     if (!$('mcHint')) return;
     $('mcHint').textContent = mcState().mode === 'group' ? 'Oznake {{ime}}, {{tvrtka}}, {{usluga}} i {{moje_ime}} svakom se primatelju popune osobno. Potpis prodavača dodaje se automatski. Slanje: najviše ' + mcLim().n + ' poruka na sat (' + mcLim().w + ')' + (isAdmin() ? '.' : '. Grupne poruke korisnika šalju se tek nakon odobrenja administratora.') : 'Oznake {{ime}}, {{tvrtka}} i {{usluga}} popunjavaju se podacima odabranog klijenta. Potpis se dodaje automatski.';
@@ -75,7 +75,7 @@
     }
     if (!o) { el.innerHTML = '<header><h3>Red slanja</h3></header><p class="muted pad">Učitavanje…</p>'; return; }
     const eta = o.eta ? new Date(o.eta) : null;
-    let h = '<header><h3>Red slanja grupne pošte</h3><span class="muted">od 08 do 16 h najviše ' + (o.rateDay || o.perHour) + ' poruka na sat, od 16 do 08 h najviše ' + (o.rateNight || o.perHour) + ' · odgovori iz Inboxa i pojedinačni mailovi imaju prednost</span></header><div class="pad">' +
+    let h = '<header><h3>Red slanja grupne pošte</h3><span class="muted">od 08 do 16 h najviše ' + (o.rateDay || o.perHour) + ' poruka na sat, od 16 do 08 h najviše ' + (o.rateNight || o.perHour) + (o.rateWeekend ? ', subotom i nedjeljom ' + o.rateWeekend : '') + ' · odgovori iz Inboxa i pojedinačni mailovi imaju prednost</span></header><div class="pad">' +
       '<p class="mcline"><span class="chip ' + (o.windowOpen ? 'ok' : '') + '">' + (o.windowOpen ? 'Slanje je sada dopušteno' : 'Izvan termina slanja') + '</span> <b class="nums">' + (o.sentLastHour + (o.individualLastHour || 0)) + ' / ' + o.perHour + '</b> poslano u zadnjih sat vremena (grupnih ' + o.sentLastHour + ', pojedinačnih ' + (o.individualLastHour || 0) + ') · na čekanju: <b class="nums">' + o.pending + '</b>' + (o.hardReached ? ' · <span class="chip warn">kvota ' + o.hardLimit + '/h puna, slanje je pauzirano</span>' : ' · ukupno ' + (o.totalLastHour || 0) + ' / ' + (o.hardLimit || 50) + ' (kvota poslužitelja)') +
       (eta && o.pending ? ' · procjena završetka: <b>' + esc(fmtTs(o.eta)) + '</b>' : '') + '</p>';
     if (o.batches.length) {
