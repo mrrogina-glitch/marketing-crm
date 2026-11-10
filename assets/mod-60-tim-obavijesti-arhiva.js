@@ -268,7 +268,7 @@
     el.innerHTML = '<p class="muted">Učitavanje segmenata…</p>';
     let d; try { d = await call('pool_segments', null, 'GET'); } catch (e) { el.innerHTML = '<p class="msg">' + esc(e.message) + '</p>'; return; }
     S.poolSeg = d;
-    el.innerHTML = '<h4 style="margin:18px 0 6px">Kampanja „Povratak"</h4><p class="hint">Šalje se izgubljenim klijentima iz arhive s ispravnom e-mail adresom (' + d.total.toLocaleString('hr-HR') + '). Poruke idu kroz red slanja: 09–15 h najviše 30 na sat, 16–08 h najviše 55 na sat, a pojedinačni e-mailovi imaju prednost. Isti klijent ne dobiva istu poruku (isti predmet) češće od jednom u 30 dana.</p>' +
+    el.innerHTML = '<h4 style="margin:18px 0 6px">Kampanja „Povratak"</h4><p class="hint">Šalje se izgubljenim klijentima iz arhive s ispravnom e-mail adresom (' + d.total.toLocaleString('hr-HR') + '). Poruke idu kroz red slanja: 08–16 h najviše 20 na sat, 16–08 h najviše 55 na sat, a pojedinačni e-mailovi imaju prednost. Isti klijent ne dobiva istu poruku (isti predmet) češće od jednom u 30 dana.</p>' +
       '<div class="grid2"><label class="f">Grad<select id="pcCity"><option value="">Svi gradovi</option>' + d.cities.map((c) => '<option value="' + esc(c.name) + '">' + esc(c.name) + ' (' + c.count.toLocaleString('hr-HR') + ')</option>').join('') + '</select></label>' +
       '<label class="f">Djelatnost<select id="pcInd"><option value="">Sve djelatnosti</option>' + d.industries.map((c) => '<option value="' + esc(c.name) + '">' + esc(c.name) + ' (' + c.count + ')</option>').join('') + '</select></label>' +
       '<label class="f">Najviše primatelja (do 1000 po slanju)<input id="pcLimit" type="number" min="1" max="1000" value="200"></label></div>' +
