@@ -303,14 +303,18 @@ function bulk_cfg(string $k): int
     return (int) cfg('bulk.' . $k, $def[$k]);
 }
 
-/** Najviše grupnih poruka na sat: 20 u razdoblju 08–16 sati, 55 u razdoblju 16–08 sati (stvarno ograničeno kvotom poslužitelja, vidi bulk_cap). */
+/** Najviše grupnih poruka na sat: 20 u razdoblju 08–16 sati radnim danom, 55 u razdoblju 16–08 sati, 50 subotom i nedjeljom (stvarno ograničeno kvotom poslužitelja, vidi bulk_cap). */
 function bulk_rate(?int $tsMs = null): int
 {
     $o = cfg('bulk.per_hour', null);
     if ($o !== null) {
         return (int) $o;
     }
-    $h = (int) date('G', intdiv($tsMs ?? ms(), 1000));
+    $t = intdiv($tsMs ?? ms(), 1000);
+    if ((int) date('N', $t) >= 6) {
+        return 50; // subota i nedjelja: 50 poruka na sat tijekom cijelog dana
+    }
+    $h = (int) date('G', $t);
     return ($h >= 8 && $h < 16) ? 20 : 55;
 }
 

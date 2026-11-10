@@ -399,6 +399,7 @@ function mail_overview(array $u): array
     return [
         'perHour' => bulk_rate(),
         'rateDay' => cfg('bulk.per_hour', null) !== null ? (int) cfg('bulk.per_hour') : 20,
+        'rateWeekend' => cfg('bulk.per_hour', null) !== null ? (int) cfg('bulk.per_hour') : 50,
         'rateNight' => cfg('bulk.per_hour', null) !== null ? (int) cfg('bulk.per_hour') : 55,
         'individualLastHour' => bulk_individual_last_hour(),
         'hardLimit' => MAIL_HOURLY_HARD,
