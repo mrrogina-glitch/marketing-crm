@@ -450,6 +450,41 @@ switch ($action) {
         out(['groups' => array_map(static fn ($g) => ['reasons' => $g['reasons'], 'clients' => array_map(static fn ($i) => $info[$i], $g['ids'])], array_slice($groups, 0, 200)), 'total' => count($groups)]);
     }
 
+    case 'dup_entities': {
+        // admin: pregled pravih duplikata poslovnih subjekata (bez spajanja)
+        $u = need_user();
+        need_admin($u);
+        $auto = 0;
+        $conflicts = [];
+        foreach (dup_entity_groups() as $ids) {
+            $a = dup_entity_analyze($ids);
+            if (!$a['conflicts']) {
+                $auto++;
+            } else {
+                $conflicts[] = $a;
+            }
+        }
+        out(['auto' => $auto, 'conflictCount' => count($conflicts), 'conflicts' => array_slice($conflicts, 0, 100), 'sharedContactGroups' => max(0, count(dup_groups()) - $auto - count($conflicts))]);
+    }
+
+    case 'dup_auto_merge': {
+        // admin: spaja samo skupine bez razlika u podacima; ostale ostaju za odluku
+        $u = need_write();
+        need_admin($u);
+        $merged = 0;
+        $left = 0;
+        foreach (dup_entity_groups() as $ids) {
+            $a = dup_entity_analyze($ids);
+            if ($a['conflicts']) {
+                $left++;
+                continue;
+            }
+            clients_merge((int) $a['keep'], $a['remove'], (int) $u['id']);
+            $merged += count($a['remove']);
+        }
+        out(['ok' => true, 'merged' => $merged, 'conflictsLeft' => $left]);
+    }
+
     case 'client_merge': {
         $u = need_write();
         need_admin($u);

@@ -79,6 +79,127 @@ function dup_groups(): array
     return $out;
 }
 
+/**
+ * Pravi duplikati poslovnih subjekata: isti OIB, ili isti naziv bez suprotnog OIB-a.
+ * Isti e-mail ili telefon uz različit OIB i naziv znači da je kontakt zajednički (vlasnik s više tvrtki), to nije duplikat.
+ * @return list<list<int>>
+ */
+function dup_entity_groups(): array
+{
+    $cl = rows('SELECT id, name, oib FROM clients ORDER BY id');
+    $parent = [];
+    $find = function (int $x) use (&$parent, &$find): int {
+        while ($parent[$x] !== $x) {
+            $parent[$x] = $parent[$parent[$x]];
+            $x = $parent[$x];
+        }
+        return $x;
+    };
+    $union = function (int $a, int $b) use (&$parent, $find): void {
+        $a = $find($a);
+        $b = $find($b);
+        if ($a !== $b) {
+            $parent[$b] = $a;
+        }
+    };
+    $byOib = [];
+    $byName = [];
+    $oibOf = [];
+    foreach ($cl as $c) {
+        $id = (int) $c['id'];
+        $parent[$id] = $id;
+        $oibOf[$id] = (string) $c['oib'];
+        if ($c['oib'] !== '') {
+            if (isset($byOib[$c['oib']])) {
+                $union($byOib[$c['oib']], $id);
+            } else {
+                $byOib[$c['oib']] = $id;
+            }
+        }
+        $k = name_key((string) $c['name']);
+        if (mb_strlen($k) >= 4) {
+            $byName[$k][] = $id;
+        }
+    }
+    foreach ($byName as $ids) {
+        $n = count($ids);
+        for ($i = 0; $i < $n; $i++) {
+            for ($j = $i + 1; $j < $n; $j++) {
+                $a = $oibOf[$ids[$i]];
+                $b = $oibOf[$ids[$j]];
+                if ($a === '' || $b === '' || $a === $b) {
+                    $union($ids[$i], $ids[$j]);
+                }
+            }
+        }
+    }
+    $g = [];
+    foreach ($cl as $c) {
+        $g[$find((int) $c['id'])][] = (int) $c['id'];
+    }
+    return array_values(array_filter($g, static fn ($x) => count($x) > 1));
+}
+
+/** Analiza jedne skupine duplikata: koji se zapis zadržava i koja polja se razlikuju (o tome odlučuje administrator). */
+function dup_entity_analyze(array $ids): array
+{
+    $in = implode(',', array_map('intval', $ids));
+    $cs = rows('SELECT * FROM clients WHERE id IN (' . $in . ') ORDER BY id');
+    $norm = [
+        'name' => static fn ($c) => name_key((string) $c['name']),
+        'oib' => static fn ($c) => (string) $c['oib'],
+        'email' => static fn ($c) => strtolower(trim((string) $c['email'])),
+        'email2' => static fn ($c) => strtolower(trim((string) $c['email2'])),
+        'phone' => static fn ($c) => phone_key((string) $c['phone']),
+        'contact' => static fn ($c) => mb_strtolower(trim((string) $c['contact'])),
+        'service' => static fn ($c) => mb_strtolower(trim((string) $c['service'])),
+        'industry' => static fn ($c) => mb_strtolower(trim((string) $c['industry'])),
+        'address' => static fn ($c) => mb_strtolower(trim((string) $c['address'])),
+        'owner' => static fn ($c) => $c['owner_id'] !== null ? (string) $c['owner_id'] : '',
+        'status' => static fn ($c) => $c['status'] === 'izgubljen' ? '' : (string) $c['status'],
+        'value' => static fn ($c) => (float) $c['value'] > 0 ? (string) (float) $c['value'] : '',
+        'camp' => static fn ($c) => (int) $c['camp_active'] === 1 ? 'aktivna' : '',
+    ];
+    $conf = [];
+    foreach ($norm as $f => $fn) {
+        $vals = [];
+        foreach ($cs as $c) {
+            $v = $fn($c);
+            if ($v !== '') {
+                $vals[$v][] = (int) $c['id'];
+            }
+        }
+        if ($f === 'camp' ? array_sum(array_map('count', $vals)) > 1 : count($vals) > 1) {
+            $show = [];
+            foreach ($cs as $c) {
+                $raw = match ($f) {
+                    'owner' => $c['owner_id'] !== null ? user_name_of($c['owner_id']) : '',
+                    'value' => (float) $c['value'] > 0 ? (string) $c['value'] : '',
+                    'camp' => (int) $c['camp_active'] === 1 ? 'aktivna' : '',
+                    'status' => $c['status'],
+                    default => (string) $c[$f],
+                };
+                if ($raw !== '' && $fn($c) !== '') {
+                    $show[(string) $c['id']] = $raw;
+                }
+            }
+            $conf[$f] = $show;
+        }
+    }
+    $best = null;
+    $bestScore = -1;
+    foreach ($cs as $c) {
+        $cnt = row('SELECT (SELECT COUNT(*) FROM notes WHERE client_id = ?) + (SELECT COUNT(*) FROM emails WHERE client_id = ?) + (SELECT COUNT(*) FROM tasks WHERE client_id = ?) AS n', [$c['id'], $c['id'], $c['id']]);
+        $score = ($c['owner_id'] !== null ? 100000 : 0) + ($c['status'] !== 'izgubljen' ? 50000 : 0) + ((int) $c['camp_active'] === 1 ? 20000 : 0) + (int) $cnt['n'] * 10 - (int) $c['id'] / 100000;
+        if ($score > $bestScore) {
+            $bestScore = $score;
+            $best = (int) $c['id'];
+        }
+    }
+    return ['keep' => $best, 'remove' => array_values(array_filter(array_map(static fn ($c) => (int) $c['id'], $cs), static fn ($i) => $i !== $best)), 'conflicts' => $conf,
+        'names' => array_map(static fn ($c) => ['id' => (string) $c['id'], 'name' => (string) $c['name'], 'oib' => (string) $c['oib'], 'email' => (string) $c['email'], 'status' => (string) $c['status']], $cs)];
+}
+
 function tables_with_client_id(): array
 {
     $pdo = db();
@@ -116,7 +237,7 @@ function clients_merge(int $keepId, array $removeIds, int $userId): array
                 continue;
             }
             $fill = [];
-            foreach (['oib', 'email', 'phone', 'contact', 'service', 'industry'] as $f) {
+            foreach (['oib', 'email', 'email2', 'phone', 'contact', 'service', 'industry', 'address'] as $f) {
                 if ((string) ($keep[$f] ?? '') === '' && (string) ($r[$f] ?? '') !== '') {
                     $fill[$f] = $r[$f];
                     $keep[$f] = $r[$f];
