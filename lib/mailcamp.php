@@ -398,9 +398,13 @@ function mail_overview(array $u): array
     $pending = bulk_pending_count();
     return [
         'perHour' => bulk_rate(),
-        'rateDay' => cfg('bulk.per_hour', null) !== null ? (int) cfg('bulk.per_hour') : 30,
+        'rateDay' => cfg('bulk.per_hour', null) !== null ? (int) cfg('bulk.per_hour') : 20,
         'rateNight' => cfg('bulk.per_hour', null) !== null ? (int) cfg('bulk.per_hour') : 55,
         'individualLastHour' => bulk_individual_last_hour(),
+        'hardLimit' => MAIL_HOURLY_HARD,
+        'totalLastHour' => mail_sent_last_hour(),
+        'hardReached' => mail_hard_reached(),
+        'capNow' => bulk_cap(),
         'window' => sprintf('%02d:00–%02d:00', bulk_cfg('from'), bulk_cfg('to')),
         'windowOpen' => bulk_window_open(),
         'sentLastHour' => bulk_sent_last_hour(),

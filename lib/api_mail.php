@@ -29,6 +29,9 @@ switch ($action) {
             throw new ApiError('Ova adresa je na popisu "ne kontaktirati" (odjava ili zahtjev klijenta). ' . ($u['role'] === 'admin' ? 'Administrator može poslati poruku uz potvrdu.' : 'Poruka nije poslana.'), 409);
         }
         $subject = f_str($in, 'subject', 255, 'Predmet', true);
+        if (empty($in['send_at']) && empty($in['followup'])) {
+            mail_hard_guard(); // pojedinačni e-mail: staje na kvoti od 50 poruka na sat
+        }
         if (preg_match('/[\r\n]/', $subject)) {
             throw new ApiError('Predmet mora biti u jednom retku.');
         }
@@ -153,6 +156,7 @@ switch ($action) {
             . implode("\n", array_map(static fn ($l) => '> ' . $l, $quoted));
         $cid = $orig['client_id'] !== null ? (int) $orig['client_id'] : null;
         $docIds = is_array($in['doc_ids'] ?? null) ? array_map('intval', $in['doc_ids']) : [];
+        mail_hard_guard(); // odgovor ima prednost pred grupnom poštom, ali staje na kvoti od 50 poruka na sat
         send_and_store($u, $to, mb_substr($subject, 0, 255), $full, $cid, '<' . $orig['message_id'] . '>', $cid ? $docIds : [], null, false, [], (int) ($orig['mailbox'] ?? 1) === 2 ? 2 : 1, $files);
         $t = ms();
         transaction(static function () use ($orig, $cid, $u, $to, $subject, $text, $t): void {
