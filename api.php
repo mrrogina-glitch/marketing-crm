@@ -525,6 +525,8 @@ try {
         case 'client_delete':
         case 'note_add':
         case 'status_change':
+        case 'dup_entities':
+        case 'dup_auto_merge':
         case 'dup_scan':
         case 'client_merge':
         case 'dup_ignore':
